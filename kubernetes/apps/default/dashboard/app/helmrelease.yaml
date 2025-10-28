@@ -54,7 +54,7 @@ spec:
     - group: ""
       kind: Service
       name: dashboard-kong-proxy
-      sectionName: "443"
+      sectionName: kong-proxy-tls
   validation:
     wellKnownCACertificates: System
     hostname: dashboard-kong-proxy.default.svc.cluster.local
