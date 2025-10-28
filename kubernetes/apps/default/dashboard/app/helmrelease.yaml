@@ -35,4 +35,4 @@ spec:
   rules:
     - backendRefs:
         - name: dashboard-kong-proxy
-          port: 80
+          port: 443
