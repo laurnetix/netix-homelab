@@ -40,10 +40,10 @@ spec:
         - name: dashboard-kong-proxy
           port: 443
 ---
-apiVersion: gateway.networking.k8s.io/v1alpha3
+apiVersion: gateway.networking.k8s.io/v1
 kind: BackendTLSPolicy
 metadata:
-  name: dashboard-tls
+  name: dashboard
 spec:
   targetRefs:
     - group:
