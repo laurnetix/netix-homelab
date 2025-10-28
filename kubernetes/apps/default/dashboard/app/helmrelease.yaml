@@ -25,7 +25,7 @@ spec:
       app:
         ports:
           http:
-            port: 80
+            port: 8000
     serviceMonitor:
       app:
         endpoints:
@@ -40,4 +40,4 @@ spec:
         rules:
           - backendRefs:
               - identifier: app
-                port: 80
+                port: 8000
