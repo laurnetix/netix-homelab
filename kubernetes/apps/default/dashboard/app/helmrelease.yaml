@@ -46,10 +46,10 @@ metadata:
   name: dashboard
 spec:
   targetRefs:
-    - group:
+    - group: ""
       kind: Service
       name: dashboard-kong-proxy
-      sectionName: 443
+      sectionName: "443"
   validation:
     wellKnownCACertificates: System
     hostname: dashboard-kong-proxy.default.svc.cluster.local
