@@ -13,18 +13,18 @@ spec:
   rules:
     - backendRefs:
         - name: dashboard-kong-proxy
-          port: 443
----
-apiVersion: gateway.networking.k8s.io/v1alpha3
-kind: BackendTLSPolicy
-metadata:
-  name: dashboard
-  namespace: default
-spec:
-  targetRefs:
-    - group: ""
-      kind: Service
-      name: dashboard-kong-proxy
-      sectionName: kong-proxy-tls
-  validation:
-    wellKnownCACertificates: System
+          port: 80
+#---
+#apiVersion: gateway.networking.k8s.io/v1alpha3
+#kind: BackendTLSPolicy
+#metadata:
+#  name: dashboard
+#  namespace: default
+#spec:
+#  targetRefs:
+#    - group: ""
+#      kind: Service
+#      name: dashboard-kong-proxy
+#      sectionName: kong-proxy-tls
+#  validation:
+#    wellKnownCACertificates: System
