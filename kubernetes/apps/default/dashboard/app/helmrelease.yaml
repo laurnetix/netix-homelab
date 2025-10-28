@@ -44,16 +44,15 @@ spec:
         - name: dashboard-kong-proxy
           port: 443
 ---
-apiVersion: gateway.networking.k8s.io/v1alpha3
-kind: BackendTLSPolicy
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: ClientTrafficPolicy
 metadata:
-  name: dashboard
+  name: dashboard-backend
   namespace: default
 spec:
   targetRefs:
-    - group: ""
-      kind: Service
-      name: dashboard-kong-proxy
-      sectionName: kong-proxy-tls
-  validation:
-    wellKnownCACertificates: System
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: dashboard
+  tls:
+    insecureSkipVerify: true
