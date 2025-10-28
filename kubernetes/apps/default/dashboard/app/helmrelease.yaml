@@ -23,6 +23,10 @@ spec:
   values:
     app:
       ingress: false
+    kong:
+      proxy:
+        tls:
+          enabled: false
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
