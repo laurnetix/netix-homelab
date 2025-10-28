@@ -20,6 +20,3 @@ spec:
       sourceRef:
         kind: HelmRepository
         name: dashboard
-  values:
-    app:
-      ingress: false
