@@ -21,23 +21,21 @@ spec:
         kind: HelmRepository
         name: dashboard
   values:
-    service:
-      app:
-        ports:
-          http:
-            port: 8000
-    serviceMonitor:
-      app:
-        endpoints:
-          - port: http
-    route:
-      app:
-        hostnames: ["{{ .Release.Name }}.${SECRET_DOMAIN}"]
-        parentRefs:
-          - name: envoy-external
-            namespace: network
-            sectionName: https
-        rules:
-          - backendRefs:
-              - identifier: app
-                port: 8000
+    app:
+      ingress: false
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: dashboard
+spec:
+  hostnames:
+    - "dashboard.${SECRET_DOMAIN}"
+  parentRefs:
+    - name: envoy-external
+      namespace: network
+      sectionName: https
+  rules:
+    - backendRefs:
+        - name: kubernetes-dashboard-kong-proxy
+          port: 443
