@@ -20,3 +20,24 @@ spec:
       sourceRef:
         kind: HelmRepository
         name: dashboard
+  values:
+    service:
+      app:
+        ports:
+          http:
+            port: 80
+    serviceMonitor:
+      app:
+        endpoints:
+          - port: http
+    route:
+      app:
+        hostnames: ["{{ .Release.Name }}.${SECRET_DOMAIN}"]
+        parentRefs:
+          - name: envoy-external
+            namespace: network
+            sectionName: https
+        rules:
+          - backendRefs:
+              - identifier: app
+                port: 80
