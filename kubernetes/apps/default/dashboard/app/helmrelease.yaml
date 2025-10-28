@@ -1,5 +1,5 @@
 ---
-apiVersion: source.toolkit.fluxcd.io/v1beta2
+apiVersion: source.toolkit.fluxcd.io/v1
 kind: HelmRepository
 metadata:
   name: dashboard
@@ -39,3 +39,17 @@ spec:
     - backendRefs:
         - name: dashboard-kong-proxy
           port: 443
+---
+apiVersion: gateway.networking.k8s.io/v1alpha3
+kind: BackendTLSPolicy
+metadata:
+  name: dashboard-tls
+spec:
+  targetRefs:
+    - group:
+      kind: Service
+      name: dashboard-kong-proxy
+      sectionName: 443
+  validation:
+    wellKnownCACertificates: System
+    hostname: dashboard-kong-proxy.default.svc.cluster.local
