@@ -20,8 +20,3 @@ spec:
       sourceRef:
         kind: HelmRepository
         name: dashboard
-  values:
-    kong:
-      proxy:
-        tls:
-          enabled: false
