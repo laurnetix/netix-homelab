@@ -38,3 +38,18 @@ spec:
     - backendRefs:
         - name: dashboard-kong-proxy
           port: 443
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: dashboard-insecure
+  namespace: default
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: dashboard
+  tls:
+    alpnProtocols:
+      - http/1.1
+    clientCertificateRef: null
