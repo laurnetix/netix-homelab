@@ -25,8 +25,6 @@ apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
   name: dashboard
-  annotations:
-    gateway.envoyproxy.io/backend-protocol: HTTPS
 spec:
   hostnames:
     - "dashboard.${SECRET_DOMAIN}"
@@ -39,17 +37,19 @@ spec:
         - name: dashboard-kong-proxy
           port: 443
 ---
-apiVersion: gateway.envoyproxy.io/v1alpha1
-kind: BackendTrafficPolicy
+apiVersion: gateway.networking.k8s.io/v1alpha3
+kind: BackendTLSPolicy
 metadata:
-  name: dashboard-insecure
+  name: dashboard
   namespace: default
 spec:
   targetRefs:
-    - group: gateway.networking.k8s.io
-      kind: HTTPRoute
-      name: dashboard
-  tls:
-    alpnProtocols:
-      - http/1.1
-    clientCertificateRef: null
+    - group: ""
+      kind: Service
+      name: dashboard-kong-proxy
+      sectionName: kong-proxy-tls
+  validation:
+    caCertificateRefs:
+      - name: kong-cert
+        group: ""
+        kind: Secret
