@@ -20,6 +20,18 @@ spec:
       sourceRef:
         kind: HelmRepository
         name: dashboard
+  values:
+    kong:
+        proxy:
+          tls:
+            enabled: true
+            servicePort: 8443
+            containerPort: 8443
+        secretVolumes:
+          - kong-custom-cert
+        env:
+          ssl_cert: /etc/secrets/kong-custom-cert/tls.crt
+          ssl_cert_key: /etc/secrets/kong-custom-cert/tls.key
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -49,7 +61,7 @@ spec:
       name: dashboard-kong-proxy
       sectionName: kong-proxy-tls
   validation:
-    hostname: localhost
+    hostname: dashboard-kong-proxy.default.svc.cluster.local
     caCertificateRefs:
       - name: kong-cert
         group: ""
