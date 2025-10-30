@@ -5,3 +5,4 @@ resources:
   - ./helmrelease.yaml
   - ./envoy-secret.yaml
   - ./kong-secret.yaml
+  - ./dashboard-user.yaml
