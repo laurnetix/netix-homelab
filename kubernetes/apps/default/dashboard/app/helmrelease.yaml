@@ -49,6 +49,7 @@ spec:
       name: dashboard-kong-proxy
       sectionName: kong-proxy-tls
   validation:
+    hostname: dashboard-kong-proxy.default.svc.cluster.local
     caCertificateRefs:
       - name: kong-cert
         group: ""
