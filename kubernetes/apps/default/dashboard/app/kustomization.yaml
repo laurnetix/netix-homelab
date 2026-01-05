@@ -4,6 +4,7 @@ kind: Kustomization
 resources:
   - ./helmrelease.yaml
   - ./ocirepository.yaml
+  - ./dashboard-user.yaml
 #  - ./envoy-secret.yaml
 #  - ./kong-secret.yaml
-#  - ./dashboard-user.yaml
+
