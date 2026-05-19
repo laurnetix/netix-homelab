@@ -1,0 +1,25 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: onepassword-connect
+spec:
+  chart:
+    spec:
+      chart: connect
+      version: 2.4.1
+      sourceRef:
+        kind: HelmRepository
+        name: 1password
+        namespace: flux-system
+  interval: 1h
+  values:
+    connect:
+      credentialsName: onepassword-connect-credentials
+      credentialsKey: 1password-credentials.json
+    operator:
+      create: true
+      autoRestart: true
+      token:
+        name: onepassword-connect-token
+        key: token
