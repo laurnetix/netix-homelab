@@ -1,6 +1,7 @@
 # Secrets
 *.pub
 *.key
+*.crt
 *.decrypted~*.yaml
 /age.key
 /cloudflare-tunnel.json
@@ -20,6 +21,3 @@ talosconfig
 .DS_Store
 Thumbs.db
 .python-version
-
-# My own temp cert file....
-kong-cert-secret.yaml

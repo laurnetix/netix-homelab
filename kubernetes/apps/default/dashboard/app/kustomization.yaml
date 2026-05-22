@@ -6,4 +6,4 @@ resources:
   - ./ocirepository.yaml
   - ./dashboard-user.yaml
   - ./kong-secret.sops.yaml
-# - ./envoy-secret.sops.yaml
+  - ./envoy-secret.sops.yaml
