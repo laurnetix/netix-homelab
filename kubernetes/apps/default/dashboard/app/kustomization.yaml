@@ -5,5 +5,5 @@ resources:
   - ./helmrelease.yaml
   - ./ocirepository.yaml
   - ./dashboard-user.yaml
-  - ./envoy-secret.sops.yaml
   - ./kong-secret.sops.yaml
+# - ./envoy-secret.sops.yaml
