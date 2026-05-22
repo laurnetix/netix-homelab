@@ -2,6 +2,9 @@
 *.pub
 *.key
 *.crt
+*.srl
+*.csr
+*.cnf
 *.decrypted~*.yaml
 /age.key
 /cloudflare-tunnel.json
