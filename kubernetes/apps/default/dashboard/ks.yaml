@@ -4,6 +4,8 @@ kind: Kustomization
 metadata:
   name: dashboard
 spec:
+  decryption:
+    provider: sops
   interval: 1h
   path: ./kubernetes/apps/default/dashboard/app
   postBuild:
