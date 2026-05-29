@@ -1,0 +1,15 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: prometheus
+spec:
+  chartRef:
+    kind: OCIRepository
+    name: prometheus
+  interval: 1h
+  values:
+    dashboard:
+      enabled: true
+    serviceMonitor:
+      enabled: true
