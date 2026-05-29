@@ -2,7 +2,7 @@
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: OCIRepository
 metadata:
-  name: grafana-operator
+  name: grafana
 spec:
   interval: 15m
   layerSelector:
@@ -10,4 +10,4 @@ spec:
     operation: copy
   ref:
     tag: 5.23.0
-  url: oci://ghcr.io/grafana/helm-charts/grafana-operator
+  url: oci://ghcr.io/grafana-community/helm-charts/grafana

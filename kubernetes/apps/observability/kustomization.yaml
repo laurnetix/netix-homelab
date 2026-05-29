@@ -8,5 +8,5 @@ components:
 
 resources:
   - ./namespace.yaml
+  - ./grafana/ks.yaml
   - ./prometheus/ks.yaml
-  - ./grafana-operator/ks.yaml
