@@ -11,7 +11,7 @@ spec:
   values:
     server:
       persistentVolume:
-        storageClass: ceph-block
+        storageClass: longhorn
     alertmanager:
       persistence:
-        storageClass: ceph-block
+        storageClass: longhorn

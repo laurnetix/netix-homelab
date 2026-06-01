@@ -5,7 +5,7 @@ metadata:
   name: prometheus
 spec:
   dependsOn:
-    - name: rook-ceph-cluster
+    - name: longhorn
   interval: 1h
   path: ./kubernetes/apps/observability/prometheus/app
   prune: true
