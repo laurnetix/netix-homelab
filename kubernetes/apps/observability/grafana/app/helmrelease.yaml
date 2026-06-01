@@ -9,10 +9,20 @@ spec:
     name: grafana
   interval: 1h
   values:
-    dashboard:
-      enabled: true
     serviceMonitor:
       enabled: true
+    datasources:
+      datasources.yaml:
+        apiVersion: 1
+        datasources:
+          - name: Prometheus
+            type: prometheus
+            uid: prometheus
+            url: http://prometheus-server.observability.svc.cluster.local
+            access: proxy
+            isDefault: true
+            jsonData:
+              timeInterval: 1m
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute

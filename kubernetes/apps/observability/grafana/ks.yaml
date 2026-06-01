@@ -4,6 +4,9 @@ kind: Kustomization
 metadata:
   name: grafana
 spec:
+  dependsOn:
+    - name: prometheus
+      namespace: observability
   interval: 1h
   path: ./kubernetes/apps/observability/grafana/app
   postBuild:
