@@ -9,7 +9,9 @@ spec:
     name: prometheus
   interval: 1h
   values:
-    dashboard:
-      enabled: true
-    serviceMonitor:
-      enabled: true
+    server:
+      persistentVolume:
+        storageClass: ceph-block
+    alertmanager:
+      persistence:
+        storageClass: ceph-block
