@@ -6,6 +6,7 @@ metadata:
 spec:
   dependsOn:
     - name: longhorn
+      namespace: longhorn-system
   interval: 1h
   path: ./kubernetes/apps/observability/prometheus/app
   prune: true
