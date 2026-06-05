@@ -1,0 +1,15 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: k8s-gateway
+spec:
+  # The k8s-gateway Service only exposes DNS (udp/53); the metrics port (9153)
+  # lives on the pod, so we scrape the pod directly rather than via a ServiceMonitor.
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: k8s-gateway
+      app.kubernetes.io/instance: k8s-gateway
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics

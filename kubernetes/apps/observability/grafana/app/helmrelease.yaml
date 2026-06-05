@@ -37,7 +37,13 @@ spec:
         volsync:
           gnetId: 21356
           revision: 3
-          datasource: Prometheus
+          # This dashboard uses the object datasource form ("uid": "${DS_PROMETHEUS}")
+          # which the chart's line-based sed can't rewrite. The list form emits a
+          # global ${DS_PROMETHEUS} -> <uid> substitution. Value is the datasource
+          # UID (see datasources below), not its name.
+          datasource:
+            - name: DS_PROMETHEUS
+              value: prometheus
 
     datasources:
       datasources.yaml:
