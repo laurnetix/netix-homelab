@@ -9,9 +9,33 @@ spec:
     name: prometheus
   interval: 1h
   values:
-    server:
-      persistentVolume:
-        storageClass: longhorn
+    # Grafana is deployed as its own app in this namespace; don't run the bundled one.
+    grafana:
+      enabled: false
+    prometheus:
+      prometheusSpec:
+        # Select all ServiceMonitors/PodMonitors/Probes/PrometheusRules/ScrapeConfigs
+        # cluster-wide, regardless of labels (our resources are label-less).
+        serviceMonitorSelectorNilUsesHelmValues: false
+        podMonitorSelectorNilUsesHelmValues: false
+        ruleSelectorNilUsesHelmValues: false
+        probeSelectorNilUsesHelmValues: false
+        scrapeConfigSelectorNilUsesHelmValues: false
+        storageSpec:
+          volumeClaimTemplate:
+            spec:
+              storageClassName: longhorn
+              accessModes: ["ReadWriteOnce"]
+              resources:
+                requests:
+                  storage: 8Gi
     alertmanager:
-      persistence:
-        storageClass: longhorn
+      alertmanagerSpec:
+        storage:
+          volumeClaimTemplate:
+            spec:
+              storageClassName: longhorn
+              accessModes: ["ReadWriteOnce"]
+              resources:
+                requests:
+                  storage: 2Gi

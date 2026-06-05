@@ -46,7 +46,7 @@ spec:
           - name: Prometheus
             type: prometheus
             uid: prometheus
-            url: http://prometheus-server.observability.svc.cluster.local
+            url: http://prometheus-operated.observability.svc.cluster.local:9090
             access: proxy
             isDefault: true
             jsonData:
