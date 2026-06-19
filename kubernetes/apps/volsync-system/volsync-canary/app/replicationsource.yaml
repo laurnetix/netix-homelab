@@ -28,6 +28,9 @@ spec:
             server: 192.168.0.31 # SYN-NAS-00 Synology
     repository: volsync-canary-volsync-secret
     retain:
-      latest: 30 # keep the 30 most recent snapshots, prune older
+      latest: 40 # floor: always keep the 40 newest snapshots
+      hourly: 24
+      daily: 7
+      weekly: 4
     storageClassName: longhorn
     volumeSnapshotClassName: longhorn
