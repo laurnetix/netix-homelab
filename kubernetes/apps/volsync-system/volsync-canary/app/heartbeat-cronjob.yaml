@@ -1,0 +1,41 @@
+---
+# Writes a fresh heartbeat to the canary PVC each hour (at :00). The
+# ReplicationSource then backs it up (at :30), so a successful backup proves the
+# whole write -> snapshot -> kopia -> NFS path end to end on a schedule.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: volsync-canary-heartbeat
+spec:
+  schedule: "0 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: 3600
+      template:
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+          containers:
+            - name: heartbeat
+              image: busybox:1.37
+              command:
+                - sh
+                - -c
+                - echo "netix-homelab volsync canary $(date -u)" > /data/canary.txt
+              volumeMounts:
+                - { name: data, mountPath: /data }
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+          volumes:
+            - name: data
+              persistentVolumeClaim:
+                claimName: volsync-canary

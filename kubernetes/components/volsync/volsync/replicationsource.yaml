@@ -30,7 +30,6 @@ spec:
     parallelism: 2
     repository: ${APP}-volsync-secret
     retain:
-      hourly: 24
-      daily: 7
+      latest: ${VOLSYNC_RETAIN_LATEST:=30} # keep N most recent snapshots, prune older
     storageClassName: ${VOLSYNC_STORAGECLASS:=longhorn}
     volumeSnapshotClassName: ${VOLSYNC_SNAPSHOTCLASS:=longhorn}
