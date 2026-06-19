@@ -1,0 +1,12 @@
+---
+# Required for VolSync copyMethod: Snapshot. Name "longhorn" matches the
+# ${VOLSYNC_SNAPSHOTCLASS:=longhorn} default in components/volsync.
+# type: snap = in-cluster Longhorn snapshot (fast, for VolSync to read from).
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotClass
+metadata:
+  name: longhorn
+driver: driver.longhorn.io
+deletionPolicy: Delete
+parameters:
+  type: snap

@@ -1,0 +1,17 @@
+---
+# Probes the Synology NFS endpoint via blackbox tcp_connect. jobName sets the
+# `job` label to nfs_probe, which the kopia zeroscaler HPA selects on.
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: nfs
+spec:
+  jobName: nfs_probe
+  interval: 30s
+  module: tcp_connect
+  prober:
+    url: blackbox-exporter.observability.svc.cluster.local:9115
+  targets:
+    staticConfig:
+      static:
+        - 192.168.0.31:2049 # SYN-NAS-00 Synology NFS

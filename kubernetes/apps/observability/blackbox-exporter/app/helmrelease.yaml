@@ -1,0 +1,19 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: blackbox-exporter
+spec:
+  chartRef:
+    kind: OCIRepository
+    name: blackbox-exporter
+  interval: 1h
+  values:
+    fullnameOverride: blackbox-exporter
+    config:
+      modules:
+        # TCP connect to the Synology NFS port (2049) — used by the nfs Probe
+        # to produce probe_success{job="nfs_probe"} for the kopia zeroscaler.
+        tcp_connect:
+          prober: tcp
+          timeout: 5s

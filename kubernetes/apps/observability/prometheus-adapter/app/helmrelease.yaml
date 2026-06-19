@@ -1,0 +1,23 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: prometheus-adapter
+spec:
+  chartRef:
+    kind: OCIRepository
+    name: prometheus-adapter
+  interval: 1h
+  values:
+    prometheus:
+      url: http://prometheus-operated.observability.svc.cluster.local
+      port: 9090
+    rules:
+      default: false
+      # Expose probe_success as a cluster-external metric so the kopia
+      # zeroscaler HPA can scale on probe_success{job="nfs_probe"}.
+      external:
+        - seriesQuery: '{__name__="probe_success",job="nfs_probe"}'
+          name:
+            as: "probe_success"
+          metricsQuery: 'max(<<.Series>>{<<.LabelMatchers>>})'
