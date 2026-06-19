@@ -18,6 +18,10 @@ spec:
       # zeroscaler HPA can scale on probe_success{job="nfs_probe"}.
       external:
         - seriesQuery: '{__name__="probe_success",job="nfs_probe"}'
+          # probe_success is cluster-global (no namespace label); without this the
+          # adapter errors "no generic resource label form specified for this metric".
+          resources:
+            namespaced: false
           name:
             as: "probe_success"
           metricsQuery: 'max(<<.Series>>{<<.LabelMatchers>>})'
