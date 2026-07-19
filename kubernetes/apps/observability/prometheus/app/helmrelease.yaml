@@ -21,6 +21,13 @@ spec:
         ruleSelectorNilUsesHelmValues: false
         probeSelectorNilUsesHelmValues: false
         scrapeConfigSelectorNilUsesHelmValues: false
+        retention: 10d
+        # Hard ceiling on persisted blocks. Without this, retention is time-only:
+        # 10d of ~400k active series overran the old 8Gi volume, WAL writes began
+        # failing with ENOSPC, and ingestion stopped entirely (dashboards went N/A).
+        # Keep this comfortably under the volume size — it does not bound the WAL,
+        # and compaction needs free space to write a new block.
+        retentionSize: 26GB
         storageSpec:
           volumeClaimTemplate:
             spec:
@@ -28,7 +35,7 @@ spec:
               accessModes: ["ReadWriteOnce"]
               resources:
                 requests:
-                  storage: 8Gi
+                  storage: 32Gi
     alertmanager:
       alertmanagerSpec:
         storage:
