@@ -1,21 +1,17 @@
 ---
-# Kubernetes upgrades follow the same one-minor-at-a-time rule as Talos. The
-# Talos ladder (v1.11.3 -> v1.12.10 -> v1.13.6) completed successfully
-# 2026-07-20, so this can now proceed. Ladder: v1.34.1 -> v1.35.6 -> v1.36.2.
-# This CR targets rung 1 only; bump to v1.36.2 in a follow-up edit once rung 1
-# is confirmed healthy, same pattern as talos.yaml.
-#
-# Unlike TalosUpgrade, this CRD has no policy/parallelism/nodeSelector/drain
-# fields - it appears to upgrade cluster-wide via a single Job rather than
-# per-node batches. Its shared status.phase enum still lists "Draining" and
-# "Rebooting" though, so this assumption is unconfirmed until watched live.
+# Kubernetes ladder: v1.34.1 -> v1.35.6 -> v1.36.2. Rung 1 (v1.35.6) completed
+# successfully 2026-07-20 in ~7 minutes via a single Job running
+# `talosctl upgrade-k8s` - confirmed live (not just from docs) that this CRD
+# does no kubectl cordon/drain at all, unlike TalosUpgrade: Alertmanager and
+# Prometheus never restarted or moved during the whole rung. This bumps to
+# rung 2 (v1.36.2), the final target.
 apiVersion: tuppr.home-operations.com/v1alpha1
 kind: KubernetesUpgrade
 metadata:
   name: kubernetes
 spec:
   kubernetes:
-    version: v1.35.6 # rung 1 of 2; v1.36.2 follows once this is healthy
+    version: v1.36.2
   healthChecks:
     - apiVersion: v1
       kind: Node
