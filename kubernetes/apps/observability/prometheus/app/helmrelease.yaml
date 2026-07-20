@@ -12,6 +12,11 @@ spec:
     # Grafana is deployed as its own app in this namespace; don't run the bundled one.
     grafana:
       enabled: false
+    # Cilium runs with kube-proxy-replacement=true, so there is no kube-proxy to
+    # scrape. Leaving this enabled makes KubeProxyDown — absent(up{job="kube-proxy"})
+    # — fire permanently at severity=critical, which can never clear.
+    kubeProxy:
+      enabled: false
     prometheus:
       prometheusSpec:
         # Select all ServiceMonitors/PodMonitors/Probes/PrometheusRules/ScrapeConfigs
