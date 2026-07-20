@@ -52,6 +52,28 @@ spec:
           - name: log
             configBlock: |-
               class error
+      # Secondary zone, additive only - the "." block above is completely
+      # unchanged. Without this, pods resolving ${SECRET_DOMAIN} hostnames
+      # fall through to the "." zone's forward (the node's public resolvers),
+      # which returns NXDOMAIN for internal-only routes. gatus's auto-discovery
+      # surfaced this: every internal HTTPRoute check failed on
+      # "no such host" while external checks passed, since gatus is the first
+      # workload needing to resolve our own hostnames from inside a pod rather
+      # than from a browser via the LAN's split-horizon DNS.
+      - zones:
+          - zone: "${SECRET_DOMAIN}."
+            scheme: dns://
+            use_tcp: true
+        port: 53
+        plugins:
+          - name: errors
+          - name: cache
+            parameters: 30
+          - name: forward
+            # k8s-gateway's ClusterIP - not its DNS name, since the forward
+            # plugin's target can't itself depend on a DNS lookup, and not its
+            # external LB IP (192.168.0.253), which is for LAN clients, not pods.
+            parameters: . 10.43.25.17
     affinity:
       nodeAffinity:
         requiredDuringSchedulingIgnoredDuringExecution:
