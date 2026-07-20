@@ -1,0 +1,32 @@
+---
+# NOT YET WIRED IN - deliberately excluded from ./kustomization.yaml.
+#
+# Kubernetes upgrades follow the same one-minor-at-a-time rule as Talos, and
+# each Talos minor bundles/tests against a specific Kubernetes range (Talos
+# 1.12.10 -> k8s v1.35.4, Talos 1.13.5 -> k8s v1.36.2). Since v1.36 needs
+# Talos 1.13.x, this must not start before the full Talos ladder
+# (v1.11.3 -> v1.12.10 -> v1.13.6) is complete.
+#
+# TalosUpgrade and KubernetesUpgrade also cannot run concurrently and are
+# resolved first-come-first-served - applying both CRs at once would leave
+# which one starts first up to chance. Add this file to
+# ./kustomization.yaml, targeting v1.35.6 as rung 1, only once talos.yaml
+# reports fully healthy on all 3 nodes at v1.13.6.
+apiVersion: tuppr.home-operations.com/v1alpha1
+kind: KubernetesUpgrade
+metadata:
+  name: kubernetes
+spec:
+  kubernetes:
+    version: v1.35.6 # rung 1 of 2; v1.36.2 follows once this is healthy
+  healthChecks:
+    - apiVersion: v1
+      kind: Node
+      expr: |-
+        status.conditions.filter(c, c.type == "Ready").all(c, c.status == "True")
+      timeout: 10m
+    - apiVersion: longhorn.io/v1beta2
+      kind: Volume
+      namespace: longhorn-system
+      expr: status.state != "attached" || status.robustness == "healthy"
+      timeout: 30m

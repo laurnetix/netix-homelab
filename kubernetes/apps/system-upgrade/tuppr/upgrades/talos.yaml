@@ -1,0 +1,52 @@
+---
+# Talos upgrades cannot skip minor versions - only adjacent-minor migrations
+# are tested (docs.siderolabs.com/talos/v1.13/.../upgrading-talos). Current:
+# v1.11.3. Ladder: v1.11.3 -> v1.12.10 -> v1.13.6. This CR targets rung 1 only;
+# bump to v1.13.6 in a follow-up edit once rung 1 is confirmed healthy on all
+# 3 nodes. tuppr does NOT enforce the ladder itself - it upgrades directly to
+# whatever version is set here.
+apiVersion: tuppr.home-operations.com/v1alpha1
+kind: TalosUpgrade
+metadata:
+  name: talos
+spec:
+  talos:
+    version: v1.12.10
+  # All 3 nodes are control-plane (no dedicated workers), so no nodeSelector -
+  # every node is in scope. Talos itself additionally enforces one-CP-node-at-
+  # a-time via etcd quorum checks, independent of tuppr.
+  policy:
+    force: false # never skip etcd health checks
+    drain:
+      enabled: true
+    # Wait for CSI volumes to fully detach before rebooting - the Longhorn
+    # engine for any volume with a replica on this node runs in this node's
+    # kernel, so a clean detach avoids an unclean engine shutdown.
+    waitForVolumeDetach: true
+    timeout: 30m # bounds cordon+drain+reboot+rejoin for a single node
+  parallelism: 1 # strictly sequential: with defaultReplicaCount 3 across
+  # exactly 3 nodes, every volume already has a replica on every node. Taking
+  # a second node down before the first's replicas fully resync would leave
+  # only 1 copy of the data.
+  healthChecks:
+    - apiVersion: v1
+      kind: Node
+      expr: |-
+        status.conditions.filter(c, c.type == "Ready").all(c, c.status == "True")
+      timeout: 10m
+    - apiVersion: longhorn.io/v1beta2
+      kind: Volume
+      namespace: longhorn-system
+      # Only require "healthy" while attached. Detached volumes report
+      # robustness "unknown" regardless of cause (e.g. volsync-canary is
+      # intentionally zeroscaled to 0 when idle) - gating on attachment state
+      # avoids hardcoding an exclusion for the canary specifically, but note
+      # this also means an unexpectedly-detached volume wouldn't block the
+      # gate. This check exists to make sure a rebooted node's replicas have
+      # finished resyncing before the next node goes down, not to be the only
+      # signal of a genuinely broken volume - Alertmanager/Telegram covers that.
+      expr: status.state != "attached" || status.robustness == "healthy"
+      # Untested assumption: how long a 32Gi volume replica takes to resync
+      # over 1GbE on these SATA SSDs. Generous starting value - watch the
+      # actual time on rung 1's first node and tighten if this is way off.
+      timeout: 30m

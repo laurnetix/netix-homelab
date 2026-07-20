@@ -1,0 +1,20 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: tuppr
+spec:
+  chartRef:
+    kind: OCIRepository
+    name: tuppr
+  interval: 1h
+  values:
+    replicaCount: 2
+    monitoring:
+      # No grafana-operator in this cluster (plain Grafana instead, see
+      # observability/grafana) - only the CRDs our existing kube-prometheus-stack
+      # already discovers.
+      prometheusRule:
+        enabled: true
+      serviceMonitor:
+        enabled: true
