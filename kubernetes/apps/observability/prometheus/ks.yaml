@@ -9,6 +9,10 @@ spec:
       namespace: longhorn-system
   interval: 1h
   path: ./kubernetes/apps/observability/prometheus/app
+  postBuild:
+    substituteFrom:
+      - name: cluster-secrets
+        kind: Secret
   prune: true
   sourceRef:
     kind: GitRepository

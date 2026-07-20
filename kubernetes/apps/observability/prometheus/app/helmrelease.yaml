@@ -38,6 +38,12 @@ spec:
                   storage: 32Gi
     alertmanager:
       alertmanagerSpec:
+        # Use our AlertmanagerConfig as the top-level config instead of the
+        # chart's default, which routes every alert to a "null" receiver.
+        alertmanagerConfiguration:
+          name: alertmanager
+          global:
+            resolveTimeout: 5m
         storage:
           volumeClaimTemplate:
             spec:

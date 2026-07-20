@@ -1,0 +1,75 @@
+---
+# Top-level Alertmanager configuration. Referenced by the HelmRelease via
+# alertmanagerSpec.alertmanagerConfiguration, which replaces the chart's
+# default config (that default routes everything to a "null" receiver, so
+# until this existed every alert was silently discarded).
+#
+# ${SECRET_ALERTMANAGER_CHAT_ID} is substituted by Flux from the sops-encrypted
+# cluster-secrets Secret — chatID is typed int64 in the CRD and cannot be read
+# from a Secret reference the way botToken can.
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: alertmanager
+spec:
+  route:
+    receiver: telegram
+    groupBy: ["alertname", "namespace"]
+    groupWait: 1m
+    groupInterval: 5m
+    repeatInterval: 12h
+    routes:
+      # Watchdog fires permanently by design and InfoInhibitor is plumbing;
+      # neither is actionable. Watchdog should eventually be routed to an
+      # external heartbeat endpoint as a dead man's switch instead.
+      - receiver: blackhole
+        matchers:
+          - name: alertname
+            matchType: =~
+            value: Watchdog|InfoInhibitor
+      # Re-notify on unresolved critical alerts far more often than the 12h default.
+      - receiver: telegram
+        repeatInterval: 1h
+        matchers:
+          - name: severity
+            matchType: =
+            value: critical
+  inhibitRules:
+    - equal: ["alertname", "namespace"]
+      sourceMatch:
+        - name: severity
+          matchType: =
+          value: critical
+      targetMatch:
+        - name: severity
+          matchType: =
+          value: warning
+    - equal: ["alertname", "namespace"]
+      sourceMatch:
+        - name: severity
+          matchType: =
+          value: warning
+      targetMatch:
+        - name: severity
+          matchType: =
+          value: info
+  receivers:
+    - name: blackhole
+    - name: telegram
+      telegramConfigs:
+        - botToken:
+            name: alertmanager-secret
+            key: TELEGRAM_BOT_TOKEN
+          chatID: ${SECRET_ALERTMANAGER_CHAT_ID}
+          parseMode: HTML
+          sendResolved: true
+          # Telegram rejects the whole message with a 400 if the HTML doesn't
+          # parse, which would drop the notification silently. Anything
+          # interpolated from an alert is escaped to avoid that.
+          message: |-
+            <b>[{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}{{ end }}] {{ .CommonLabels.alertname }}</b>
+            {{ if .CommonLabels.severity }}<b>severity</b>: {{ .CommonLabels.severity }}{{ end }}
+            {{ if .CommonLabels.namespace }}<b>namespace</b>: {{ .CommonLabels.namespace }}{{ end }}
+            {{ range .Alerts }}
+            {{ if .Annotations.description }}{{ .Annotations.description | reReplaceAll "&" "&amp;" | reReplaceAll "<" "&lt;" | reReplaceAll ">" "&gt;" }}{{ else if .Annotations.summary }}{{ .Annotations.summary | reReplaceAll "&" "&amp;" | reReplaceAll "<" "&lt;" | reReplaceAll ">" "&gt;" }}{{ else }}(no description){{ end }}
+            {{ end }}
