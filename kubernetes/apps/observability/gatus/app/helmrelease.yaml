@@ -71,6 +71,10 @@ spec:
         runAsNonRoot: true
         runAsUser: 1000
         runAsGroup: 1000
+        # Without this, Longhorn mounts the /config PVC group-owned by root,
+        # and neither the app (sqlite) nor the sidecar (its temp-file writes)
+        # can write to it as uid/gid 1000 - both crashed on exactly this.
+        fsGroup: 1000
     persistence:
       # Real PVC rather than emptyDir - lets gatus's sqlite history (uptime,
       # past results) survive pod restarts/upgrades instead of resetting.
