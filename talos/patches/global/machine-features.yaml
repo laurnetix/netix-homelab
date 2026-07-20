@@ -1,0 +1,12 @@
+machine:
+  features:
+    # Lets the tuppr controller (system-upgrade namespace) authenticate to the
+    # Talos API from inside the cluster via a talos.dev/v1alpha1 ServiceAccount
+    # CRD, instead of mounting a raw talosconfig. Required for tuppr to run
+    # talosctl upgrade/reboot against nodes at all.
+    kubernetesTalosAPIAccess:
+      enabled: true
+      allowedRoles:
+        - os:admin
+      allowedKubernetesNamespaces:
+        - system-upgrade
