@@ -19,14 +19,24 @@ spec:
     groupInterval: 5m
     repeatInterval: 12h
     routes:
-      # Watchdog fires permanently by design and InfoInhibitor is plumbing;
-      # neither is actionable. Watchdog should eventually be routed to an
-      # external heartbeat endpoint as a dead man's switch instead.
+      # Watchdog fires permanently by design. Pinging healthchecks.io on every
+      # repeat makes it a dead man's switch: healthchecks alerts us when the
+      # pings STOP, which is how we find out Prometheus/Alertmanager itself died.
+      # groupInterval must be below repeatInterval or it would clamp the ping rate.
+      - receiver: heartbeat
+        groupWait: 0s
+        groupInterval: 1m
+        repeatInterval: 2m30s
+        matchers:
+          - name: alertname
+            matchType: =
+            value: Watchdog
+      # InfoInhibitor is inhibit-rule plumbing, never actionable.
       - receiver: blackhole
         matchers:
           - name: alertname
-            matchType: =~
-            value: Watchdog|InfoInhibitor
+            matchType: =
+            value: InfoInhibitor
       # Re-notify on unresolved critical alerts far more often than the 12h default.
       - receiver: telegram
         repeatInterval: 1h
@@ -55,6 +65,16 @@ spec:
           value: info
   receivers:
     - name: blackhole
+    - name: heartbeat
+      webhookConfigs:
+        # sendResolved MUST stay false. If Watchdog ever resolves — which is
+        # exactly the "Prometheus is down" case this exists to catch —
+        # a resolved notification would ping healthchecks.io and reset the
+        # timer, suppressing the very alert we want.
+        - sendResolved: false
+          urlSecret:
+            name: alertmanager-secret
+            key: HEARTBEAT_URL
     - name: telegram
       telegramConfigs:
         - botToken:
