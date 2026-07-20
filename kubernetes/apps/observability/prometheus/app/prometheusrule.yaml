@@ -1,0 +1,43 @@
+---
+# Replacement for the built-in KubeHpaMaxedOut, which is disabled via
+# defaultRules.disabled in the HelmRelease.
+#
+# The upstream rule guards with (max != min) to skip HPAs that cannot scale,
+# but that misses the zeroscaler pattern (kubernetes/components/zeroscaler):
+# minReplicas 0 / maxReplicas 1, used as an on/off switch driven by an external
+# probe metric rather than as an autoscaler. 0 != 1 passes the upstream guard,
+# so the alert fired permanently for every running zeroscaled app.
+#
+# Added guard: max > 1. An HPA with a ceiling of one replica is never
+# meaningfully "at capacity". The original max != min guard is kept so pinned
+# HPAs (min == max) stay excluded too.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: kubernetes-apps-custom
+spec:
+  groups:
+    - name: kubernetes-apps-custom
+      rules:
+        - alert: KubeHpaMaxedOut
+          annotations:
+            description: HPA {{ $labels.namespace }}/{{ $labels.horizontalpodautoscaler }} has been running at max replicas for longer than 15 minutes on cluster {{ $labels.cluster }}.
+            runbook_url: https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubehpamaxedout
+            summary: HPA is running at max replicas
+          expr: |-
+            (
+              kube_horizontalpodautoscaler_status_current_replicas{job="kube-state-metrics"}
+                ==
+              kube_horizontalpodautoscaler_spec_max_replicas{job="kube-state-metrics"}
+            )
+            and on (namespace, horizontalpodautoscaler, cluster) (
+              kube_horizontalpodautoscaler_spec_max_replicas{job="kube-state-metrics"}
+                !=
+              kube_horizontalpodautoscaler_spec_min_replicas{job="kube-state-metrics"}
+            )
+            and on (namespace, horizontalpodautoscaler, cluster) (
+              kube_horizontalpodautoscaler_spec_max_replicas{job="kube-state-metrics"} > 1
+            )
+          for: 15m
+          labels:
+            severity: warning

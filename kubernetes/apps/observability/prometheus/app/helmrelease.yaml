@@ -12,6 +12,12 @@ spec:
     # Grafana is deployed as its own app in this namespace; don't run the bundled one.
     grafana:
       enabled: false
+    # KubeHpaMaxedOut is replaced by a zeroscaler-aware copy in
+    # prometheusrule.yaml — the upstream guard doesn't exclude minReplicas 0 /
+    # maxReplicas 1 HPAs, so it fired permanently for every zeroscaled app.
+    defaultRules:
+      disabled:
+        KubeHpaMaxedOut: true
     # Cilium runs with kube-proxy-replacement=true, so there is no kube-proxy to
     # scrape. Leaving this enabled makes KubeProxyDown — absent(up{job="kube-proxy"})
     # — fire permanently at severity=critical, which can never clear.
