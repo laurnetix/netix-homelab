@@ -7,3 +7,5 @@ resources:
   - ./helmrelease.yaml
   - ./ocirepository.yaml
   - ./prometheusrule.yaml
+  - ./volsync-alertmanager.yaml
+  - ./volsync-prometheus.yaml
