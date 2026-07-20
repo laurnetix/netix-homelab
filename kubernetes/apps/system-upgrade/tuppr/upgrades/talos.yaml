@@ -17,8 +17,10 @@ spec:
   # a-time via etcd quorum checks, independent of tuppr.
   policy:
     force: false # never skip etcd health checks
-    drain:
-      enabled: true
+    # No `drain:` block here - spec.policy.drain doesn't exist in the real CRD
+    # (confirmed against the live schema after tuppr installed; `spec.drain` is
+    # a separate, deprecated top-level field). Drain is enabled by default;
+    # `policy.nodrain: true` is what would turn it off, which we don't want.
     # Wait for CSI volumes to fully detach before rebooting - the Longhorn
     # engine for any volume with a replica on this node runs in this node's
     # kernel, so a clean detach avoids an unclean engine shutdown.
