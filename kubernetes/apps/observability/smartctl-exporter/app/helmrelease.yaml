@@ -1,0 +1,22 @@
+---
+# Runs privileged (runAsUser: 0) with a hostPath mount of /dev on every node -
+# hardcoded in the chart's DaemonSet template, not configurable via values.
+# Unavoidable: smartctl needs raw block-device ioctl access to read SMART data.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: smartctl-exporter
+spec:
+  chartRef:
+    kind: OCIRepository
+    name: smartctl-exporter
+  interval: 1h
+  values:
+    fullnameOverride: smartctl-exporter
+    prometheusRules:
+      enabled: false # using our own PrometheusRule resource instead
+    serviceMonitor:
+      enabled: true
+      relabelings:
+        - action: labeldrop
+          regex: (pod)

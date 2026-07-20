@@ -1,0 +1,20 @@
+---
+# Alerts route through the existing Alertmanager/Telegram pipeline rather
+# than gatus's own separate alerting integrations - one notification path.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: gatus
+spec:
+  groups:
+    - name: gatus.rules
+      rules:
+        - alert: GatusEndpointDown
+          expr: |-
+            gatus_results_endpoint_success == 0
+          for: 5m
+          annotations:
+            summary: >-
+              The {{ $labels.name }} endpoint is down
+          labels:
+            severity: critical

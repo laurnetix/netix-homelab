@@ -34,6 +34,10 @@ spec:
           gnetId: 1860
           revision: 37
           datasource: Prometheus
+        smartctl-exporter:
+          gnetId: 22604
+          revision: 3
+          datasource: Prometheus
         volsync:
           gnetId: 21356
           revision: 3
