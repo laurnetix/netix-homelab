@@ -1,19 +1,19 @@
 ---
-# Backs up the Alertmanager PVC (silences, notification log) via VolSync/Kopia.
-# Same rationale as volsync-prometheus.yaml re: not using components/volsync
-# directly — this PVC name is StatefulSet-generated, not literally "alertmanager".
-# Named *-volsync* to avoid colliding with the existing "alertmanager"
-# ExternalSecret (Telegram bot token) already in this app.
+# Backs up the VictoriaLogs data PVC via VolSync/Kopia to the same NFS
+# repository used by other apps (see volsync-kopia-backup-architecture).
+# Not using components/volsync directly: that component assumes sourcePVC ==
+# ${APP}, but this PVC name is StatefulSet-generated (volumeClaimTemplate),
+# not literally "victoria-logs".
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
-  name: alertmanager-volsync
+  name: victoria-logs-volsync
 spec:
   secretStoreRef:
     kind: ClusterSecretStore
     name: onepassword-connect
   target:
-    name: alertmanager-volsync-secret
+    name: victoria-logs-volsync-secret
     template:
       data:
         KOPIA_PASSWORD: "{{ .KOPIA_PASSWORD }}"
@@ -25,23 +25,24 @@ spec:
 apiVersion: volsync.backube/v1alpha1
 kind: ReplicationSource
 metadata:
-  name: alertmanager
+  name: victoria-logs
 spec:
-  sourcePVC: alertmanager-prometheus-kube-prometheus-alertmanager-db-alertmanager-prometheus-kube-prometheus-alertmanager-0
+  # StatefulSet volumeClaimTemplate-generated name, not "victoria-logs".
+  sourcePVC: server-volume-victoria-logs-0
   trigger:
     schedule: 0 * * * *
   kopia:
     accessModes: [ReadWriteOnce]
     cacheAccessModes: [ReadWriteOnce]
-    cacheCapacity: 1Gi
+    cacheCapacity: 5Gi
     cacheStorageClassName: openebs-hostpath
     compression: zstd-fastest
     copyMethod: Snapshot
     moverSecurityContext:
-      # Must match the Alertmanager pod's actual securityContext
-      # (runAsUser: 1000, runAsGroup: 2000, fsGroup: 2000).
+      # Must match the victoria-logs pod's actual securityContext
+      # (runAsUser: 1000, fsGroup: 2000) or the mover cannot read the
+      # data through the volume snapshot.
       runAsUser: 1000
-      runAsGroup: 2000
       fsGroup: 2000
     moverVolumes:
       - mountPath: repository
@@ -50,7 +51,7 @@ spec:
             path: /volume1/kopia
             server: 192.168.0.31 # Synology NAS
     parallelism: 2
-    repository: alertmanager-volsync-secret
+    repository: victoria-logs-volsync-secret
     retain:
       latest: 40
       hourly: 24
