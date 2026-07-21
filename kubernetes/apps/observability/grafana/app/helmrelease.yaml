@@ -37,7 +37,12 @@ spec:
         smartctl-exporter:
           gnetId: 22604
           revision: 3
-          datasource: Prometheus
+          # Same object-datasource-form gotcha as volsync below - dashboard
+          # 22604 uses "uid": "${DS_PROMETHEUS}" throughout, which the chart's
+          # line-based sed can't rewrite via the simple string form.
+          datasource:
+            - name: DS_PROMETHEUS
+              value: prometheus
         volsync:
           gnetId: 21356
           revision: 3
