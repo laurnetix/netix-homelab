@@ -11,6 +11,7 @@ metadata:
   name: talos
 spec:
   talos:
+    # renovate: datasource=docker depName=ghcr.io/siderolabs/installer
     version: v1.13.6
   # All 3 nodes are control-plane (no dedicated workers), so no nodeSelector -
   # every node is in scope. Talos itself additionally enforces one-CP-node-at-
