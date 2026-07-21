@@ -6,6 +6,10 @@ metadata:
 spec:
   interval: 1h
   path: ./kubernetes/apps/storage/longhorn/app
+  postBuild:
+    substituteFrom:
+      - name: cluster-secrets
+        kind: Secret
   prune: true
   sourceRef:
     kind: GitRepository
