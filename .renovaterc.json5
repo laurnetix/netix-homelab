@@ -30,6 +30,22 @@
   },
   packageRules: [
     {
+      // Merging a bump to these auto-triggers a LIVE rolling cluster upgrade:
+      // the tuppr TalosUpgrade/KubernetesUpgrade CRs
+      // (kubernetes/apps/system-upgrade/tuppr/upgrades/{talos,kubernetes}.yaml)
+      // are Flux-managed, so Flux applies the new version and tuppr immediately
+      // drains+reboots each node. Require explicit approval so upgrades happen
+      // on our terms: Renovate still surfaces new versions under "Pending
+      // Approval" on the dashboard, but opens no PR until the box is ticked.
+      // Also covers the (inert) talos/talenv.yaml, keeping all three in step.
+      description: "Require manual approval for Talos & Kubernetes version bumps",
+      matchPackageNames: [
+        "ghcr.io/siderolabs/installer",
+        "ghcr.io/siderolabs/kubelet",
+      ],
+      dependencyDashboardApproval: true,
+    },
+    {
       description: "Override Helmfile Dependency Name",
       matchDatasources: ["docker"],
       matchManagers: ["helmfile"],
