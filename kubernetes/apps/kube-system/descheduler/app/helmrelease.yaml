@@ -97,6 +97,16 @@ spec:
               args:
                 nodeAffinityType:
                   - requiredDuringSchedulingIgnoredDuringExecution
+            # These three take no arguments, but descheduler still requires a
+            # pluginConfig entry for EVERY plugin listed under `plugins` - it
+            # looks the config up by name when building the profile and hard
+            # fails with `unable to find "<name>" plugin config` otherwise.
+            # The failure is silent from Kubernetes' point of view: the pod
+            # stays Running and 1/1 Ready, holds the leader lease, and simply
+            # never descheduls anything. Do not "tidy" these away.
+            - name: RemovePodsViolatingInterPodAntiAffinity
+            - name: RemovePodsViolatingNodeTaints
+            - name: RemovePodsViolatingTopologySpreadConstraint
             - name: LowNodeUtilization
               args:
                 # Request-based, NOT metrics-based (no metricsProviders /
