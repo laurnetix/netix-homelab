@@ -1,0 +1,140 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: descheduler
+spec:
+  chartRef:
+    kind: OCIRepository
+    name: descheduler
+  interval: 1h
+  values:
+    # The chart defaults to a CronJob (*/2 * * * *). A Deployment with an
+    # internal 5m loop is steadier: one long-lived pod, real leader election,
+    # and a /metrics endpoint Prometheus can actually scrape between runs.
+    kind: Deployment
+    deschedulingInterval: 5m
+    replicas: 1
+    leaderElection:
+      # Only 1 replica, but a rolling update briefly runs two pods. Without
+      # this they would both evict in the same window.
+      enabled: true
+
+    # Chart default is 500m CPU *requested* (and limited). That is ~8% of a
+    # 6-core node permanently reserved for something that wakes up every 5
+    # minutes - self-defeating for a workload whose whole job is fixing
+    # request-based imbalance. No CPU limit, so it can still burst during a
+    # cycle without being throttled.
+    resources:
+      requests:
+        cpu: 10m
+        memory: 128Mi
+      limits:
+        # Explicit null strips the chart's default 500m ceiling - Helm deletes
+        # a key when the override is null, and a plain omission here would
+        # leave the default in place (maps deep-merge).
+        cpu: null
+        memory: 512Mi
+
+    service:
+      enabled: true
+    serviceMonitor:
+      enabled: true
+
+    deschedulerPolicyAPIVersion: descheduler/v1alpha2
+    deschedulerPolicy:
+      # Cap churn per cycle. Converging today's 43/19/45 pod split needs ~12
+      # moves, so this spreads the rebalance over ~4 cycles (~20 min) instead
+      # of stampeding the scheduler in one pass.
+      maxNoOfPodsToEvictPerNode: 3
+      profiles:
+        - name: default
+          pluginConfig:
+            - name: DefaultEvictor
+              args:
+                # Only evict a pod if it would actually fit somewhere else.
+                # On a 3-node cluster without this, an eviction can land the
+                # pod right back on the same node (pure churn) or leave it
+                # Pending.
+                nodeFit: true
+                podProtections:
+                  defaultDisabled:
+                    # Failed pods with no owner will never be recreated by
+                    # anything - let them be cleaned up.
+                    - FailedBarePods
+                  extraEnabled:
+                    # NOTE: this is the deliberate divergence from buroa's
+                    # config, which leaves PVC pods evictable. Every PVC here
+                    # is Longhorn or openebs-hostpath: evicting one means a
+                    # volume detach/reattach, the exact operation behind the
+                    # tuppr drain deadlocks. The pods that carry PVCs
+                    # (prometheus, alertmanager, victoria-logs, gatus, kopia,
+                    # volsync-canary) are ~7 of ~107, so protecting them costs
+                    # almost nothing in rebalancing terms and removes the only
+                    # genuinely risky eviction class.
+                    # Can be narrowed later via
+                    # podProtections.config.PodsWithPVC.protectedStorageClasses
+                    # if a future storage class should stay evictable.
+                    - PodsWithPVC
+                  # PodsWithLocalStorage, DaemonSetPods and SystemCriticalPods
+                  # stay protected (chart/upstream defaults). buroa disables
+                  # the latter two; keeping them on means coredns and friends
+                  # are left alone.
+            - name: RemoveFailedPods
+              args:
+                reasons:
+                  - ContainerStatusUnknown
+                  - NodeAffinity
+                  - NodeShutdown
+                  - Terminated
+                  - UnexpectedAdmissionError
+                includingInitContainers: true
+                # Jobs are expected to fail and be retried by their controller.
+                excludeOwnerKinds:
+                  - Job
+                minPodLifetimeSeconds: 1800
+            - name: RemovePodsViolatingNodeAffinity
+              args:
+                nodeAffinityType:
+                  - requiredDuringSchedulingIgnoredDuringExecution
+            - name: LowNodeUtilization
+              args:
+                # Request-based, NOT metrics-based (no metricsProviders /
+                # metricsUtilization). Requests are what the scheduler itself
+                # uses, so evicted pods get placed by the same measure that
+                # decided a node was overloaded. Live metrics would also make
+                # the `pods` dimension ambiguous, and pod count is currently
+                # the clearest imbalance signal here.
+                #
+                # Tuned against real values (requests / requests / pods-of-110):
+                #   node-01  cpu 39%  mem 33%  pods 39%  -> over  (mem)
+                #   node-02  cpu 18%  mem 13%  pods 17%  -> under (all)
+                #   node-03  cpu 30%  mem 26%  pods 41%  -> over  (pods)
+                # A node is "under" only if below *every* threshold, and
+                # "over" if above *any* targetThreshold. The chart's stock
+                # 20/20/20 -> 50/50/50 would be an inert no-op on this
+                # cluster: nothing here is above 50% of anything.
+                thresholds:
+                  cpu: 25
+                  memory: 20
+                  pods: 25
+                targetThresholds:
+                  cpu: 40
+                  memory: 32
+                  pods: 38
+                # Converged state is ~29% cpu / 24% mem / 32% pods per node -
+                # under no targetThreshold and over no threshold, so the
+                # plugin goes quiet instead of oscillating.
+                evictionLimits:
+                  node: 3
+          plugins:
+            balance:
+              enabled:
+                - LowNodeUtilization
+                - RemovePodsViolatingTopologySpreadConstraint
+            deschedule:
+              enabled:
+                - RemoveFailedPods
+                - RemovePodsViolatingInterPodAntiAffinity
+                - RemovePodsViolatingNodeAffinity
+                - RemovePodsViolatingNodeTaints

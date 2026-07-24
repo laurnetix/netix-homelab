@@ -1,0 +1,18 @@
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: descheduler
+spec:
+  interval: 15m
+  layerSelector:
+    mediaType: application/vnd.cncf.helm.chart.content.v1.tar+gzip
+    operation: copy
+  ref:
+    # Descheduler tracks Kubernetes minor-for-minor: chart/app 0.36.x targets
+    # k8s 1.36.x, which is what this cluster runs. Renovate will offer 0.37.0
+    # once it exists - hold that until the Kubernetes upgrade to 1.37 lands
+    # first, otherwise the eviction logic runs against an API it wasn't
+    # validated on.
+    tag: 0.36.0
+  url: oci://ghcr.io/home-operations/charts-mirror/descheduler
