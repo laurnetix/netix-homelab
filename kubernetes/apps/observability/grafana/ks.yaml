@@ -7,6 +7,12 @@ spec:
   dependsOn:
     - name: prometheus
       namespace: observability
+    # ReplicationSource needs the VolSync operator; the grafana-volsync
+    # ExternalSecret needs the ClusterSecretStore.
+    - name: volsync
+      namespace: volsync-system
+    - name: external-secrets-stores
+      namespace: external-secrets
   interval: 1h
   path: ./kubernetes/apps/observability/grafana/app
   postBuild:

@@ -20,6 +20,13 @@ spec:
       defaultReplicaCount: 3
       defaultDataPath: /var/lib/longhorn
       storageMinimalAvailablePercentage: 10
+    # Chart-native ServiceMonitor for the longhorn-manager metrics (port
+    # manager/9500 on the longhorn-backend svc). Prometheus here runs
+    # serviceMonitorSelectorNilUsesHelmValues:false, so it is selected without
+    # needing a release label. Paired with ./prometheusrule.yaml.
+    metrics:
+      serviceMonitor:
+        enabled: true
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute

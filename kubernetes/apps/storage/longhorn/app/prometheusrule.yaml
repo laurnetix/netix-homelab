@@ -1,0 +1,97 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: longhorn
+spec:
+  groups:
+    - name: longhorn.rules
+      rules:
+        # --- Volume data-usage ---
+        - alert: LonghornVolumeActualSpaceUsedWarning
+          expr: |-
+            (longhorn_volume_actual_size_bytes / longhorn_volume_capacity_bytes) * 100 > 90
+          for: 5m
+          annotations:
+            summary: >-
+              Longhorn volume {{ $labels.volume }} is over 90% full ({{ $value | printf "%.1f" }}%)
+          labels:
+            severity: warning
+
+        # --- Volume robustness (0=unknown 1=healthy 2=degraded 3=faulted) ---
+        # Degraded is EXPECTED briefly during tuppr node reboots: a replica on
+        # the rebooting node drops and resyncs (observed <2m on the 32Gi PVCs).
+        # 10m keeps planned upgrades from firing this while still catching a
+        # replica that genuinely fails to rejoin.
+        - alert: LonghornVolumeDegraded
+          expr: |-
+            longhorn_volume_robustness == 2
+          for: 10m
+          annotations:
+            summary: >-
+              Longhorn volume {{ $labels.volume }} has been Degraded for 10m
+          labels:
+            severity: warning
+
+        # Faulted = no healthy replica = data unavailable. With 3 replicas on 3
+        # nodes this needs all copies lost, so treat any occurrence as critical.
+        - alert: LonghornVolumeFaulted
+          expr: |-
+            longhorn_volume_robustness == 3
+          for: 5m
+          annotations:
+            summary: >-
+              Longhorn volume {{ $labels.volume }} is Faulted (no healthy replica)
+          labels:
+            severity: critical
+
+        # --- Node / disk storage ---
+        # Each node has a single 256Gi NVMe that is BOTH the Talos install disk
+        # and Longhorn's data path, so headroom is genuinely tight here (unlike
+        # a multi-disk or NAS-backed setup). Longhorn stops scheduling new
+        # replicas once free space drops below storageMinimalAvailablePercentage
+        # (10%, i.e. at 90% used), so the critical tier fires at 85% to leave a
+        # window to act before that cutoff.
+        - alert: LonghornNodeStorageWarning
+          expr: |-
+            (longhorn_node_storage_usage_bytes / longhorn_node_storage_capacity_bytes) * 100 > 70
+          for: 5m
+          annotations:
+            summary: >-
+              Longhorn node {{ $labels.node }} storage is over 70% used ({{ $value | printf "%.1f" }}%)
+          labels:
+            severity: warning
+
+        - alert: LonghornNodeStorageCritical
+          expr: |-
+            (longhorn_node_storage_usage_bytes / longhorn_node_storage_capacity_bytes) * 100 > 85
+          for: 5m
+          annotations:
+            summary: >-
+              Longhorn node {{ $labels.node }} storage is over 85% used ({{ $value | printf "%.1f" }}%) - approaching the 90% no-schedule cutoff
+          labels:
+            severity: critical
+
+        - alert: LonghornDiskStorageWarning
+          expr: |-
+            (longhorn_disk_usage_bytes / longhorn_disk_capacity_bytes) * 100 > 70
+          for: 5m
+          annotations:
+            summary: >-
+              Longhorn disk on {{ $labels.node }} is over 70% used ({{ $value | printf "%.1f" }}%)
+          labels:
+            severity: warning
+
+        # --- Node availability ---
+        # A tuppr reboot takes a node down for ~7m (drain+reboot+rejoin), so 10m
+        # avoids firing on every planned upgrade rung while still catching a node
+        # that is down outside an upgrade window.
+        - alert: LonghornNodeDown
+          expr: |-
+            (avg(longhorn_node_count_total) or on() vector(0)) - (count(longhorn_node_status{condition="ready"} == 1) or on() vector(0)) > 0
+          for: 10m
+          annotations:
+            summary: >-
+              A Longhorn node is offline (expected count not all Ready)
+          labels:
+            severity: critical

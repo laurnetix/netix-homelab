@@ -26,6 +26,60 @@ endpoints:
     name: Quad9
     url: icmp://9.9.9.9
 
+  # --- Infrastructure dependencies the HTTPRoute sidecar can't discover ---
+  # These are the non-HTTP substrate the cluster sits on. The sidecar only
+  # finds apps behind envoy-internal; if the NFS store, gateway, DNS or control
+  # plane goes sideways, every app can look "up" while backups silently fail or
+  # the node network degrades. gatus exposes these as gatus_results_* metrics
+  # (metrics: true), so PrometheusRules could later alert on them via the same
+  # Alertmanager->Telegram path.
+  - conditions:
+      - "[CONNECTED] == true"
+    group: infrastructure
+    interval: 1m
+    name: NFS (Synology)
+    # All VolSync/Kopia backups + the kopia UI mount this; a dead NFS export is
+    # invisible on the app status page but breaks every ReplicationSource.
+    url: tcp://192.168.0.31:2049
+
+  - conditions:
+      - "[CONNECTED] == true"
+    group: infrastructure
+    interval: 1m
+    name: Gateway (UCG-Ultra)
+    # The cluster's default gateway, DNS forwarder and internet egress path.
+    url: icmp://192.168.0.1
+
+  - conditions:
+      - "[CONNECTED] == true"
+    group: infrastructure
+    interval: 1m
+    name: Kube API (VIP)
+    # Talos control-plane VIP; a TCP connect proves the API is reachable.
+    url: tcp://192.168.0.252:6443
+
+  - conditions:
+      - "[DNS_RCODE] == NOERROR"
+    group: infrastructure
+    interval: 1m
+    name: Internal DNS (k8s-gateway)
+    # Queries the k8s-gateway LB directly for an internal name to prove
+    # split-horizon resolution still works.
+    url: "192.168.0.253"
+    dns:
+      query-name: "grafana.${SECRET_DOMAIN}"
+      query-type: "A"
+
+  # --- External path: Cloudflare edge -> tunnel -> cloudflared -> envoy-external ---
+  - conditions:
+      - "[STATUS] == 200"
+    group: external
+    interval: 1m
+    name: External (echo via tunnel)
+    # echo is published on envoy-external, so a 200 here exercises the whole
+    # public chain end to end, not just the in-cluster gateway.
+    url: https://echo.${SECRET_DOMAIN}
+
 metrics: true
 
 storage:

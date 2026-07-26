@@ -11,6 +11,23 @@ spec:
   values:
     serviceMonitor:
       enabled: true
+    # Persist /var/lib/grafana (grafana.db: users, preferences, annotations,
+    # and any dashboards created in the UI) instead of the chart's default
+    # emptyDir, which reset on every pod restart. Backed up hourly by the
+    # ReplicationSource in ./volsync-grafana.yaml.
+    persistence:
+      enabled: true
+      type: pvc
+      storageClassName: longhorn
+      accessModes:
+        - ReadWriteOnce
+      size: 2Gi
+    # The PVC is RWO on Longhorn; the default RollingUpdate strategy would try
+    # to start the new pod (mounting the same volume) before the old one
+    # releases it, deadlocking on multi-attach. Recreate tears the old pod down
+    # first. Grafana is a singleton, so the brief downtime on upgrade is fine.
+    deploymentStrategy:
+      type: Recreate
     dashboardProviders:
       dashboardproviders.yaml:
         apiVersion: 1
