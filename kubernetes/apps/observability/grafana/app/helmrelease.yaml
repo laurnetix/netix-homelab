@@ -43,6 +43,22 @@ spec:
           datasource:
             - name: DS_PROMETHEUS
               value: prometheus
+        # UniFi metrics from observability/unpoller. Both of these use the
+        # bare-string "datasource": "${DS_PROMETHEUS}" form, which the chart's
+        # line-based sed rewrites fine - so they take the simple string form
+        # (the datasource NAME) rather than the list workaround below.
+        # Deliberately omitting the other unpoller dashboards: 11314 (UAP) and
+        # 11312 (USW) need UniFi access points and UniFi switches, and 23027
+        # needs a UniFi PDU. WiFi here is the outer TP-Link and the cluster
+        # switch is an unmanaged Netgear, so all three would render empty.
+        unifi-client-insights:
+          gnetId: 11315
+          revision: 9
+          datasource: Prometheus
+        unifi-network-sites:
+          gnetId: 11311
+          revision: 5
+          datasource: Prometheus
         volsync:
           gnetId: 21356
           revision: 3
