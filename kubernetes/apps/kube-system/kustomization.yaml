@@ -5,6 +5,7 @@ namespace: kube-system
 
 components:
   - ../../components/sops
+  - ../../components/alerts
 
 resources:
   - ./namespace.yaml

@@ -5,6 +5,7 @@ namespace: system-upgrade
 
 components:
   - ../../components/sops
+  - ../../components/alerts
 
 resources:
   - ./namespace.yaml
