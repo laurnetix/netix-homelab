@@ -2,6 +2,8 @@
 
 ![healthchecks.io](https://healthchecks.io/badge/7587481e-cd07-4200-88da-712f36/7FFykYXx-2.svg)
 
+Fresh edits push plain main branch
+
 # ⛵ Cluster Template
 
 Welcome to my template designed for deploying a single Kubernetes cluster. Whether you're setting up a cluster at home on bare-metal or virtual machines (VMs), this project aims to simplify the process and make Kubernetes more accessible. This template is inspired by my personal [home-ops](https://github.com/onedr0p/home-ops) repository, providing a practical starting point for anyone interested in managing their own Kubernetes environment.
