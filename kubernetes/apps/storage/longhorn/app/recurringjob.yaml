@@ -1,0 +1,45 @@
+---
+# Reclaims blocks that a workload freed at the filesystem level but that
+# Longhorn still counts as allocated. Without this, longhorn_volume_actual_size
+# only ever grows and LonghornVolumeActualSpaceUsedWarning (see
+# ./prometheusrule.yaml) fires on volumes that are not actually full.
+#
+# Measured on the Prometheus TSDB volume 2026-08-03: Longhorn reported 28.61GiB
+# allocated of 32Gi (89.4%) while prometheus_tsdb_storage_blocks_bytes was only
+# 7.76GiB. The ~21GiB delta is blocks freed by TSDB compaction that were never
+# TRIMmed back. Retention (10d / 26GB) is correct and is NOT the cause.
+#
+# groups: [default] rather than a per-volume label because Longhorn already
+# stamps every volume it creates with
+# `recurring-job-group.longhorn.io/default: enabled` — verified on all 6
+# volumes. Nothing needs labelling, and volumes created later are picked up
+# automatically. That matters here: most PVCs are StatefulSet
+# volumeClaimTemplate- or Helm-generated, so their Longhorn Volume CRs are not
+# GitOps-managed and could not be labelled from this repo anyway.
+#
+# Timing: the global `remove-snapshots-during-filesystem-trim` setting is false
+# (each volume inherits it via `setting.longhorn.io/...: ignored`), so trim
+# cannot reclaim blocks still pinned by a snapshot. VolSync takes a temporary
+# snapshot of every source hourly on the hour and the Prometheus mover holds it
+# ~15m (see volsync-prometheus.yaml), so :40 past the hour is clear of it.
+# 07:40 UTC = 03:40 America/New_York — this CRD has no timezone field, so the
+# cron is evaluated in the longhorn-manager container's timezone (UTC).
+apiVersion: longhorn.io/v1beta2
+kind: RecurringJob
+metadata:
+  name: filesystem-trim
+spec:
+  # Longhorn matches the job to volumes by spec.name, which must equal
+  # metadata.name.
+  name: filesystem-trim
+  task: filesystem-trim
+  groups:
+    - default
+  cron: "40 7 * * *"
+  # One volume at a time: trim is real I/O against the replicas, and all three
+  # nodes share a single NVMe that is both the Talos install disk and Longhorn's
+  # data path.
+  concurrency: 1
+  # Unused by filesystem-trim (it retains no snapshots/backups), but the field
+  # is part of the spec.
+  retain: 0

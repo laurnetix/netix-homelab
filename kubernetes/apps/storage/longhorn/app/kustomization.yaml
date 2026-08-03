@@ -5,4 +5,5 @@ resources:
   - ./helmrepository.yaml
   - ./helmrelease.yaml
   - ./prometheusrule.yaml
+  - ./recurringjob.yaml
   - ./volumesnapshotclass.yaml
