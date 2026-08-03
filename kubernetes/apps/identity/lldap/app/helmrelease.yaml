@@ -1,0 +1,105 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: lldap
+spec:
+  chartRef:
+    kind: OCIRepository
+    name: lldap
+  interval: 1h
+  values:
+    controllers:
+      lldap:
+        # Recreate, not RollingUpdate: the SQLite database lives on a RWO
+        # Longhorn volume, so two pods cannot hold it at once.
+        strategy: Recreate
+        annotations:
+          reloader.stakater.com/auto: "true"
+        containers:
+          app:
+            image:
+              # Rootless variant deliberately. The standard image starts as
+              # root to fix permissions before dropping privileges, which
+              # conflicts with runAsNonRoot below.
+              repository: ghcr.io/lldap/lldap
+              tag: v0.6.3-alpine-rootless
+            env:
+              LLDAP_LDAP_PORT: &ldapPort 3890
+              LLDAP_HTTP_PORT: &httpPort 17170
+              # Used to build password-reset links in outgoing mail.
+              LLDAP_HTTP_URL: https://lldap.${SECRET_DOMAIN}
+              # Self-service password reset via the Phase 1 relay. The relay is
+              # unauthenticated on the pod network, so no credentials are set
+              # here and encryption is NONE for that hop; the relay itself uses
+              # STARTTLS onward to Resend.
+              LLDAP_SMTP_OPTIONS__ENABLE_PASSWORD_RESET: true
+              LLDAP_SMTP_OPTIONS__SERVER: smtp-relay.network.svc.cluster.local
+              LLDAP_SMTP_OPTIONS__PORT: 25
+              LLDAP_SMTP_OPTIONS__SMTP_ENCRYPTION: NONE
+              LLDAP_SMTP_OPTIONS__FROM: LLDAP <noreply@send.${SECRET_DOMAIN}>
+            envFrom:
+              - secretRef:
+                  name: "{{ .Release.Name }}-secret"
+            probes:
+              liveness: &probes
+                enabled: true
+                custom: true
+                spec:
+                  tcpSocket:
+                    port: *ldapPort
+                  initialDelaySeconds: 10
+                  periodSeconds: 30
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+              readiness: *probes
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: { drop: ["ALL"] }
+            resources:
+              requests:
+                cpu: 10m
+              limits:
+                memory: 256Mi
+    defaultPodOptions:
+      securityContext:
+        # Matches UID/GID baked into the rootless image. The VolSync mover in
+        # volsync-lldap.yaml must use these same IDs or it cannot read the
+        # database through the snapshot.
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+    persistence:
+      data:
+        existingClaim: lldap
+        globalMounts:
+          - path: /data
+      # readOnlyRootFilesystem is on; give the process a writable scratch dir.
+      tmp:
+        type: emptyDir
+        medium: Memory
+        globalMounts:
+          - path: /tmp
+    service:
+      app:
+        ports:
+          http:
+            port: *httpPort
+          # In-cluster only - Authelia binds here in Phase 3. Deliberately not
+          # routed through any Gateway.
+          ldap:
+            port: *ldapPort
+    route:
+      app:
+        hostnames: ["lldap.${SECRET_DOMAIN}"]
+        parentRefs:
+          - name: envoy-internal
+            namespace: network
+            sectionName: https
+        rules:
+          - backendRefs:
+              - identifier: app
+                port: *httpPort

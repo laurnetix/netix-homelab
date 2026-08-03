@@ -1,0 +1,57 @@
+---
+# LLDAP exposes no Prometheus endpoint of its own (its config has no metrics
+# section), so these alerts are built on kube-state-metrics and the VolSync
+# metrics that already exist in this cluster.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: lldap
+spec:
+  groups:
+    - name: lldap.rules
+      rules:
+        # LLDAP down means nobody can authenticate anywhere once Authelia is
+        # bound to it in Phase 3 - the highest-blast-radius outage in the
+        # identity stack. Recreate strategy means a rollout briefly has zero
+        # replicas, so 10m separates that from a genuine failure.
+        - alert: LLDAPDown
+          expr: |-
+            kube_deployment_status_replicas_available{namespace="identity", deployment="lldap"} == 0
+          for: 10m
+          annotations:
+            summary: >-
+              LLDAP has had no available replica for 10m - directory
+              authentication is unavailable
+          labels:
+            severity: critical
+
+        # The directory is the only copy of every family account, so a silently
+        # stalled backup is the failure mode that matters most - it stays
+        # invisible until a restore is actually needed.
+        #
+        # VolSyncVolumeOutOfSync (volsync-system) already covers sync FAILURES
+        # cluster-wide. This rule covers the different case of backups silently
+        # ceasing to run at all, which leaves no failing sync to detect. The
+        # schedule is hourly, so six hours with no completed sync is unambiguous.
+        - alert: LLDAPBackupNotRunning
+          expr: |-
+            increase(volsync_sync_duration_seconds_count{obj_namespace="identity", obj_name="lldap", role="source"}[6h]) == 0
+          for: 1h
+          annotations:
+            summary: >-
+              LLDAP has completed no VolSync backup in 6h - the family account
+              directory is unprotected
+          labels:
+            severity: critical
+
+        # PVC filling up would stop the directory accepting writes.
+        - alert: LLDAPVolumeFillingUp
+          expr: |-
+            (kubelet_volume_stats_used_bytes{namespace="identity", persistentvolumeclaim="lldap"}
+              / kubelet_volume_stats_capacity_bytes{namespace="identity", persistentvolumeclaim="lldap"}) * 100 > 85
+          for: 15m
+          annotations:
+            summary: >-
+              LLDAP volume is over 85% full ({{ $value | printf "%.1f" }}%)
+          labels:
+            severity: warning
