@@ -1,0 +1,31 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: cloudnative-pg
+spec:
+  chartRef:
+    kind: OCIRepository
+    name: cloudnative-pg
+  interval: 1h
+  values:
+    crds:
+      create: true
+    config:
+      # Watch every namespace so each application can own a Cluster alongside
+      # its own workload (see ADR-0001: one database per application).
+      clusterWide: true
+    monitoring:
+      # Prometheus selects PodMonitors cluster-wide regardless of labels
+      # (podMonitorSelectorNilUsesHelmValues: false), so no extra labels needed.
+      podMonitorEnabled: true
+      # Left disabled deliberately: Grafana here loads dashboards declaratively
+      # from the chart's `dashboards:` values, not via a label sidecar, so a
+      # generated ConfigMap would have nothing to consume it.
+      grafanaDashboard:
+        create: false
+    resources:
+      requests:
+        cpu: 10m
+      limits:
+        memory: 256Mi
