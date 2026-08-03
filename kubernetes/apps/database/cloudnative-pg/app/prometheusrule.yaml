@@ -1,0 +1,110 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: cloudnative-pg
+spec:
+  groups:
+    - name: cloudnative-pg.operator.rules
+      rules:
+        # The operator reconciles failovers, switchovers and backups. While it
+        # is down, existing databases keep serving but nothing self-heals - a
+        # primary failure would go unrepaired. Single replica by design, so a
+        # rollout blip is normal; 10m distinguishes that from a real outage.
+        - alert: CloudNativePGOperatorDown
+          expr: |-
+            sum(up{job="database/cloudnative-pg"}) == 0
+          for: 10m
+          annotations:
+            summary: >-
+              CloudNativePG operator has been down for 10m - no failover,
+              switchover or backup reconciliation is happening
+          labels:
+            severity: critical
+
+    # Cluster-level rules, adapted from the upstream CloudNativePG samples.
+    # These are intentionally dormant until the first Cluster is created in
+    # Phase 3 (Authelia): every cnpg_* series below is exported by the database
+    # instances, not the operator, so with no Clusters they simply have no data
+    # and never fire.
+    - name: cloudnative-pg.cluster.rules
+      rules:
+        # A transaction open >5m holds back vacuum and bloats the database.
+        - alert: CNPGLongRunningTransaction
+          expr: |-
+            cnpg_backends_max_tx_duration_seconds > 300
+          for: 1m
+          annotations:
+            summary: >-
+              CNPG {{ $labels.pod }} has a transaction open longer than 5m
+          labels:
+            severity: warning
+
+        # Backends stuck waiting on locks - usually a symptom of the above.
+        - alert: CNPGBackendsWaiting
+          expr: |-
+            cnpg_backends_waiting_total > 300
+          for: 1m
+          annotations:
+            summary: >-
+              CNPG {{ $labels.pod }} has backends waiting for over 5m
+          labels:
+            severity: warning
+
+        # Transaction ID wraparound risk. Left unattended this eventually
+        # forces the database into read-only to protect itself.
+        - alert: CNPGDatabaseXidAge
+          expr: |-
+            cnpg_pg_database_xid_age > 300000000
+          for: 1m
+          annotations:
+            summary: >-
+              CNPG {{ $labels.pod }} is approaching transaction ID wraparound
+              (xid age {{ $value }})
+          labels:
+            severity: warning
+
+        # Replica falling behind the primary - a failover now would lose data.
+        - alert: CNPGReplicationLag
+          expr: |-
+            cnpg_pg_replication_lag > 300
+          for: 1m
+          annotations:
+            summary: >-
+              CNPG {{ $labels.pod }} replication lag is over 5m
+          labels:
+            severity: warning
+
+        # WAL archiving is failing, which silently invalidates point-in-time
+        # recovery even though the database looks healthy.
+        - alert: CNPGLastFailedArchiveTime
+          expr: |-
+            (cnpg_pg_stat_archiver_last_failed_time - cnpg_pg_stat_archiver_last_archived_time) > 1
+          for: 1m
+          annotations:
+            summary: >-
+              CNPG {{ $labels.pod }} failed to archive WAL - point-in-time
+              recovery is compromised
+          labels:
+            severity: warning
+
+        - alert: CNPGDatabaseDeadlockConflicts
+          expr: |-
+            cnpg_pg_stat_database_deadlocks > 10
+          for: 1m
+          annotations:
+            summary: >-
+              CNPG {{ $labels.pod }} has more than 10 deadlock conflicts
+          labels:
+            severity: warning
+
+        - alert: CNPGReplicaFailingReplication
+          expr: |-
+            cnpg_pg_replication_in_recovery > cnpg_pg_replication_is_wal_receiver_up
+          for: 1m
+          annotations:
+            summary: >-
+              CNPG replica {{ $labels.pod }} is in recovery but its WAL receiver
+              is down - replication has stopped
+          labels:
+            severity: warning

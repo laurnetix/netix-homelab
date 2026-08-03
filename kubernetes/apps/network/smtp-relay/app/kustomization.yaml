@@ -5,6 +5,7 @@ resources:
   - ./externalsecret.yaml
   - ./helmrelease.yaml
   - ./ocirepository.yaml
+  - ./prometheusrule.yaml
 configMapGenerator:
   - name: smtp-relay-configmap
     files:

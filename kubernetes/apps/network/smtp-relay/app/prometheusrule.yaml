@@ -1,0 +1,51 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: smtp-relay
+spec:
+  groups:
+    - name: smtp-relay.rules
+      rules:
+        # No relay at all means Authelia password-reset and 2FA-recovery mail
+        # cannot be sent - a silent lockout risk, since the failure only shows
+        # up when someone actually needs to recover an account.
+        - alert: SMTPRelayDown
+          expr: |-
+            sum(up{job="smtp-relay"}) == 0
+          for: 5m
+          annotations:
+            summary: >-
+              All SMTP relay replicas have been down for 5m - outbound mail
+              (password resets, 2FA recovery) is failing
+          labels:
+            severity: critical
+
+        # One replica persistently down still delivers mail but removes the
+        # redundancy. 15m rides out normal rollouts and node reboots.
+        - alert: SMTPRelayInstanceDown
+          expr: |-
+            up{job="smtp-relay"} == 0
+          for: 15m
+          annotations:
+            summary: >-
+              SMTP relay replica {{ $labels.pod }} has been down for 15m
+          labels:
+            severity: warning
+
+        # The queue is the real health signal for upstream delivery. maddy
+        # accepts mail locally and returns 250 before contacting Resend, so a
+        # revoked API key, an expired Resend domain or a provider outage shows
+        # up ONLY as a queue that stops draining - applications see success.
+        # Normal steady state is 0; delivery is sub-second.
+        - alert: SMTPRelayQueueBacklog
+          expr: |-
+            maddy_queue_length > 0
+          for: 15m
+          annotations:
+            summary: >-
+              SMTP relay queue on {{ $labels.pod }} has not drained for 15m
+              ({{ $value }} queued) - upstream delivery to Resend is likely
+              failing
+          labels:
+            severity: warning

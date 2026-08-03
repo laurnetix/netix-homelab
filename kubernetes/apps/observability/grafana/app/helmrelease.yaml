@@ -86,6 +86,22 @@ spec:
           datasource:
             - name: DS_PROMETHEUS
               value: prometheus
+        # Official CloudNativePG dashboard. Same object-datasource form as
+        # volsync above, so it needs the list workaround. This one declares a
+        # SECOND input, DS_EXPRESSION, bound to Grafana's built-in expression
+        # engine whose UID is the literal "__expr__" - leaving it unsubstituted
+        # breaks the panel that uses it.
+        # Panels stay empty until the first CNPG Cluster exists (Phase 3,
+        # Authelia): cnpg_* metrics come from the database instances, not the
+        # operator. Unlike the omitted unpoller dashboards, that data IS coming.
+        cloudnative-pg:
+          gnetId: 20417
+          revision: 4
+          datasource:
+            - name: DS_PROMETHEUS
+              value: prometheus
+            - name: DS_EXPRESSION
+              value: __expr__
 
     datasources:
       datasources.yaml:
