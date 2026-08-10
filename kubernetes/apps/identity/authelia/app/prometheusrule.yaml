@@ -1,0 +1,48 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: authelia
+spec:
+  groups:
+    - name: authelia.rules
+      rules:
+        # Authelia down means no one can sign in to any externally published
+        # service. It is the single highest-blast-radius outage in the stack.
+        - alert: AutheliaDown
+          expr: |-
+            kube_deployment_status_replicas_available{namespace="identity", deployment="authelia"} == 0
+          for: 10m
+          annotations:
+            summary: >-
+              Authelia has had no available replica for 10m - single sign-on is
+              unavailable for all external services
+          labels:
+            severity: critical
+
+        # Authelia holds no accounts itself, but losing Postgres loses every
+        # 2FA enrolment and forces the whole family to re-enrol.
+        - alert: AutheliaPostgresDown
+          expr: |-
+            kube_statefulset_status_replicas_ready{namespace="identity", statefulset=~"authelia-postgres.*"} == 0
+          for: 10m
+          annotations:
+            summary: >-
+              Authelia's PostgreSQL cluster has no ready instance for 10m -
+              logins and 2FA verification will fail
+          labels:
+            severity: critical
+
+        # Sustained failed logins on an internet-facing portal. Authelia's own
+        # regulation bans the source after 3 tries; this surfaces a broad or
+        # persistent attempt that regulation alone would silently absorb.
+        - alert: AutheliaHighAuthFailureRate
+          expr: |-
+            sum(rate(authelia_authn_total{success="false"}[10m])) > 0.5
+          for: 15m
+          annotations:
+            summary: >-
+              Authelia is seeing a sustained rate of failed authentications
+              ({{ $value | printf "%.2f" }}/s over 10m)
+          labels:
+            severity: warning

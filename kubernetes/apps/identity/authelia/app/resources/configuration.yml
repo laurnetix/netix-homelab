@@ -1,0 +1,95 @@
+---
+# Non-sensitive Authelia configuration. Anything secret - or anything containing
+# the LDAP base DN - is supplied instead as an AUTHELIA_* environment variable
+# from authelia-secret, which takes precedence over the values here.
+
+theme: 'auto'
+
+server:
+  address: 'tcp://:9091'
+
+log:
+  level: 'info'
+  format: 'json'
+
+telemetry:
+  metrics:
+    enabled: true
+    address: 'tcp://:9959/metrics'
+
+totp:
+  issuer: '${SECRET_DOMAIN}'
+  algorithm: 'sha1'
+  digits: 6
+  period: 30
+
+authentication_backend:
+  # How often group membership changes in LLDAP are picked up.
+  refresh_interval: '5 minutes'
+  password_reset:
+    # REQUIRED to be disabled: the bind account is in lldap_strict_readonly and
+    # therefore cannot write a new password back to the directory. Password
+    # resets are handled by LLDAP's own self-service flow, which sends mail
+    # through the same relay. Enabling this would surface a reset form that
+    # always fails.
+    disable: true
+  ldap:
+    # Built-in preset: fills in users_filter, groups_filter and the whole
+    # attribute mapping for LLDAP, so only the connection details are needed.
+    implementation: 'lldap'
+    address: 'ldap://lldap.identity.svc.cluster.local:3890'
+    # base_dn / user / password arrive via AUTHELIA_* env vars.
+
+access_control:
+  # Deny by default; every protected app opts in explicitly. Nothing uses
+  # forward-auth yet - Jellyfin deliberately must not (ADR-0001), so the first
+  # real rules arrive with the first browser-only external app.
+  default_policy: 'deny'
+  rules:
+    # The portal itself must never require auth, or login is unreachable.
+    - domain: 'auth.${SECRET_DOMAIN}'
+      policy: 'bypass'
+
+session:
+  cookies:
+    - domain: '${SECRET_DOMAIN}'
+      authelia_url: 'https://auth.${SECRET_DOMAIN}'
+      name: 'authelia_session'
+      expiration: '1 hour'
+      inactivity: '15 minutes'
+      remember_me: '1 month'
+
+regulation:
+  # Brute-force protection on the externally reachable portal.
+  max_retries: 3
+  find_time: '2 minutes'
+  ban_time: '10 minutes'
+
+storage:
+  postgres:
+    # CNPG publishes a -rw service that always points at the current primary,
+    # so failover needs no config change here.
+    address: 'tcp://authelia-postgres-rw.identity.svc.cluster.local:5432'
+    database: 'authelia'
+    username: 'authelia'
+    # password arrives via AUTHELIA_STORAGE_POSTGRES_PASSWORD from the
+    # CNPG-generated authelia-postgres-app secret.
+
+notifier:
+  # The startup check emails startup_check_address (default: test@authelia.com)
+  # on EVERY start. With Renovate restarting this pod regularly that would be a
+  # stream of real messages through Resend to a third party, so it is off.
+  # Relay-side failures are already covered by the SMTPRelayQueueBacklog alert.
+  disable_startup_check: true
+  smtp:
+    address: 'smtp://smtp-relay.network.svc.cluster.local:25'
+    sender: 'Authelia <noreply@send.${SECRET_DOMAIN}>'
+    subject: '[Authelia] {title}'
+    # The in-cluster hop to maddy is plaintext by design; the relay applies
+    # STARTTLS on the onward leg to Resend.
+    disable_require_tls: true
+
+# identity_providers.oidc is deliberately absent. Authelia requires at least one
+# RSA key in `jwks` once the OIDC section exists, and there are no clients to
+# register yet. It arrives in Phase 4 with Jellyfin as the first client; the
+# issuer URL is already fixed at auth.${SECRET_DOMAIN} per ADR-0001.
