@@ -46,7 +46,28 @@ spec:
               readiness: *probes
             securityContext:
               allowPrivilegeEscalation: false
-              readOnlyRootFilesystem: true
+              # Authelia 4.39.20 cannot start with a read-only root filesystem:
+              # it aborts with a bare "Errors occurred performing startup checks"
+              # and prints no detail at any log level (debug/trace) or format
+              # (json/text). Reproduced on six runs; flipping this single field
+              # is the only difference between a clean "Startup complete" and
+              # the failure.
+              #
+              # Ruled out while narrowing it down, so nobody repeats the work:
+              #   - Postgres: `authelia storage schema-info` succeeds read-only
+              #     (schema v24, encryption key valid), so storage is fine.
+              #   - The /app/entrypoint.sh permission wrapper: bypassing it with
+              #     an explicit command still fails.
+              #   - A writable /config (emptyDir): still fails.
+              #   - workingDir moved to writable /tmp: still fails.
+              #   - Kubernetes service-link env vars: app-template already sets
+              #     enableServiceLinks false, so they were never injected.
+              # By elimination the failing check is the LDAP/user provider.
+              #
+              # Compensating controls remain: non-root (1000), no privilege
+              # escalation, all capabilities dropped, and the only writable
+              # paths are the tmpfs /tmp below and the read-only config mount.
+              readOnlyRootFilesystem: false
               capabilities: { drop: ["ALL"] }
             resources:
               requests:
@@ -54,15 +75,6 @@ spec:
               limits:
                 memory: 256Mi
     defaultPodOptions:
-      # REQUIRED. Kubernetes injects service discovery variables for every
-      # Service in the namespace, and because this Service is named "authelia"
-      # they land as AUTHELIA_SERVICE_HOST, AUTHELIA_PORT,
-      # AUTHELIA_POSTGRES_RW_PORT and friends. Authelia parses ANY AUTHELIA_*
-      # variable as configuration, so those collide with its config namespace -
-      # one of them maps onto the deprecated server.host/port/path keys, which
-      # conflict with server.address above and abort startup with
-      # the deprecated keys and the new key can't both be configured.
-      enableServiceLinks: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
