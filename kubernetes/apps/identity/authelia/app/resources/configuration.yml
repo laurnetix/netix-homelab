@@ -132,4 +132,11 @@ identity_providers:
           - 'authorization_code'
         access_token_signed_response_alg: 'none'
         userinfo_signed_response_alg: 'none'
-        token_endpoint_auth_method: 'client_secret_post'
+        # MUST be client_secret_basic, despite Authelia's own Jellyfin
+        # integration guide specifying client_secret_post. jellyfin-plugin-sso
+        # uses Duende.IdentityModel.OidcClient, which authenticates with HTTP
+        # Basic. With 'post' the plugin fails at the Pushed Authorization
+        # Request step - Jellyfin logs "Failed to push authorization parameters"
+        # and returns HTTP 400, while Authelia rejects it with
+        # "the OAuth 2.0 client registration does not allow this method".
+        token_endpoint_auth_method: 'client_secret_basic'
