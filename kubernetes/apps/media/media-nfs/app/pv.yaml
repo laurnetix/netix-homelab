@@ -1,0 +1,49 @@
+---
+# Bulk media storage on the Synology NAS (ADR-0002).
+#
+# Deliberately NOT backed up. This share is a separate Synology shared folder
+# from /volume1/kopia and is excluded from the Hyper Backup / C2 job: media is
+# replaceable, and re-acquisition is the recovery path. Only the small per-app
+# config PVCs on Longhorn go offsite.
+#
+# A statically defined NFS PersistentVolume is used rather than the Synology CSI
+# driver, which provisions single-node iSCSI block devices and therefore cannot
+# be shared by the several pods that must all see the same library.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: media-nfs
+spec:
+  # Nominal only. NFS enforces no quota; capacity exists solely to satisfy the
+  # PV/PVC binding contract, and the real limit is free space on the NAS volume.
+  capacity:
+    storage: 10Ti
+  accessModes: ["ReadWriteMany"]
+  # Retain, never Delete: removing the PVC must never be able to reclaim - and
+  # therefore destroy - the media library.
+  persistentVolumeReclaimPolicy: Retain
+  # Empty string opts out of dynamic provisioning so no StorageClass controller
+  # tries to manage this volume.
+  storageClassName: ""
+  mountOptions:
+    # hard: retry indefinitely rather than returning I/O errors if the NAS
+    # briefly goes away - a soft mount can corrupt an in-progress download.
+    - hard
+    # Media is read far more than it is written; skip atime updates.
+    - noatime
+  nfs:
+    server: 192.168.0.31 # Synology NAS
+    path: /volume1/media
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: media-nfs
+spec:
+  accessModes: ["ReadWriteMany"]
+  resources:
+    requests:
+      storage: 10Ti
+  storageClassName: ""
+  # Bind to the specific PV above rather than letting the scheduler choose.
+  volumeName: media-nfs

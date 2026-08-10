@@ -1,0 +1,36 @@
+---
+# The NFS share is deliberately excluded from backup (ADR-0002), which makes
+# free space the thing worth watching: a full share silently breaks imports and
+# leaves downloads stuck part-written. These series only appear once a pod
+# actually mounts the claim, so they stay dormant until the media stack lands.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: media-nfs
+spec:
+  groups:
+    - name: media-nfs.rules
+      rules:
+        - alert: MediaNFSFillingUp
+          expr: |-
+            (kubelet_volume_stats_used_bytes{namespace="media", persistentvolumeclaim="media-nfs"}
+              / kubelet_volume_stats_capacity_bytes{namespace="media", persistentvolumeclaim="media-nfs"}) * 100 > 85
+          for: 30m
+          annotations:
+            summary: >-
+              Synology media share is over 85% full
+              ({{ $value | printf "%.1f" }}%)
+          labels:
+            severity: warning
+
+        - alert: MediaNFSAlmostFull
+          expr: |-
+            (kubelet_volume_stats_used_bytes{namespace="media", persistentvolumeclaim="media-nfs"}
+              / kubelet_volume_stats_capacity_bytes{namespace="media", persistentvolumeclaim="media-nfs"}) * 100 > 95
+          for: 15m
+          annotations:
+            summary: >-
+              Synology media share is over 95% full
+              ({{ $value | printf "%.1f" }}%) - imports and downloads will fail
+          labels:
+            severity: critical
