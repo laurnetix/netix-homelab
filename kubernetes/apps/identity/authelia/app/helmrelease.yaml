@@ -21,6 +21,11 @@ spec:
               tag: 4.39.20
             env:
               X_AUTHELIA_CONFIG: /config/configuration.yml
+              # Enables the Go template filter so configuration.yml can pull the
+              # JWKS key and Jellyfin client secret in from mounted files. Without
+              # this the {{ secret ... }} directives are treated as literal text
+              # and Authelia fails to parse the OIDC section.
+              X_AUTHELIA_CONFIG_FILTERS: template
               # Supplied by CNPG rather than 1Password: the operator generates
               # and owns this credential, so there is only one copy of it.
               AUTHELIA_STORAGE_POSTGRES_PASSWORD:
@@ -93,6 +98,13 @@ spec:
         medium: Memory
         globalMounts:
           - path: /tmp
+      # Read by the config template filter at startup, never as env vars.
+      oidc:
+        type: secret
+        name: authelia-oidc-secret
+        globalMounts:
+          - path: /secrets
+            readOnly: true
     service:
       app:
         ports:

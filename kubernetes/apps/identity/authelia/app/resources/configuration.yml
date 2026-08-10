@@ -89,7 +89,47 @@ notifier:
     # STARTTLS on the onward leg to Resend.
     disable_require_tls: true
 
-# identity_providers.oidc is deliberately absent. Authelia requires at least one
-# RSA key in `jwks` once the OIDC section exists, and there are no clients to
-# register yet. It arrives in Phase 4 with Jellyfin as the first client; the
-# issuer URL is already fixed at auth.${SECRET_DOMAIN} per ADR-0001.
+# OpenID Connect provider. Per ADR-0001 this is Mode B - Authelia acts as the
+# identity provider and each application runs its own session - rather than a
+# forward-auth wall, which native Jellyfin clients cannot use.
+#
+# The two secret values below are injected by Authelia's Go template filter
+# (X_AUTHELIA_CONFIG_FILTERS=template) reading files mounted from
+# authelia-oidc-secret. They are NOT environment variables: the JWKS key is a
+# multi-line PEM, and the client secret lives inside a list element, neither of
+# which maps cleanly onto Authelia's env-var scheme. This keeps both out of the
+# ConfigMap, and therefore out of this public repository.
+identity_providers:
+  oidc:
+    jwks:
+      - key: {{ secret "/secrets/oidc-jwks.pem" | mindent 10 "|" | msquote }}
+    clients:
+      - client_id: 'jellyfin'
+        client_name: 'Jellyfin'
+        # PBKDF2 digest, not the plaintext. Jellyfin's SSO plugin holds the
+        # plaintext counterpart.
+        client_secret: {{ secret "/secrets/jellyfin-client-secret.digest" | msquote }}
+        public: false
+        # Forces a second factor for Jellyfin web sign-in. This is what makes
+        # TOTP enrolment appear in the Authelia portal (ADR-0001 item 11) - with
+        # no client demanding two_factor there was nothing to enrol for.
+        authorization_policy: 'two_factor'
+        require_pkce: true
+        pkce_challenge_method: 'S256'
+        redirect_uris:
+          # Path is fixed by jellyfin-plugin-sso: /sso/OID/redirect/<provider>,
+          # where the provider is named "authelia" in the plugin config.
+          - 'https://jellyfin.${SECRET_DOMAIN}/sso/OID/redirect/authelia'
+        scopes:
+          - 'openid'
+          - 'profile'
+          # Carries LLDAP group membership so the plugin can map admins/members
+          # onto Jellyfin roles. Groups stay defined in LLDAP only (ADR-0001).
+          - 'groups'
+        response_types:
+          - 'code'
+        grant_types:
+          - 'authorization_code'
+        access_token_signed_response_alg: 'none'
+        userinfo_signed_response_alg: 'none'
+        token_endpoint_auth_method: 'client_secret_post'
