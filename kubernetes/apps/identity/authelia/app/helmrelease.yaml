@@ -61,7 +61,7 @@ spec:
       # variable as configuration, so those collide with its config namespace -
       # one of them maps onto the deprecated server.host/port/path keys, which
       # conflict with server.address above and abort startup with
-      # "the deprecated keys and the new key can't both be configured".
+      # the deprecated keys and the new key can't both be configured.
       enableServiceLinks: false
       securityContext:
         runAsNonRoot: true
