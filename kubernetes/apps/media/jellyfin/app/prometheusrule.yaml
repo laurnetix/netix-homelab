@@ -1,0 +1,55 @@
+---
+# Jellyfin ships a Prometheus endpoint at /metrics, but it is disabled by
+# default and can only be turned on by editing EnableMetrics in system.xml
+# inside the config volume - there is no environment variable for it
+# (jellyfin/jellyfin#6247) - so it cannot be enabled declaratively before first
+# run. It is also, by the project's own description, very sparse. These alerts
+# therefore use kube-state-metrics and VolSync series instead.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: jellyfin
+spec:
+  groups:
+    - name: jellyfin.rules
+      rules:
+        # Jellyfin is internet-facing and used by family from outside the
+        # house, so an outage is user-visible in a way internal apps are not.
+        # Recreate strategy means a rollout briefly has zero replicas.
+        - alert: JellyfinDown
+          expr: |-
+            kube_deployment_status_replicas_available{namespace="media", deployment="jellyfin"} == 0
+          for: 15m
+          annotations:
+            summary: >-
+              Jellyfin has had no available replica for 15m - media streaming is
+              unavailable to remote users
+          labels:
+            severity: warning
+
+        # Holds watch history, users and the metadata library - none of which a
+        # re-download would restore, unlike the media itself.
+        - alert: JellyfinBackupNotRunning
+          expr: |-
+            increase(volsync_sync_duration_seconds_count{obj_namespace="media", obj_name="jellyfin", role="source"}[6h]) == 0
+          for: 1h
+          annotations:
+            summary: >-
+              Jellyfin has completed no VolSync backup in 6h - watch history and
+              user accounts are unprotected
+          labels:
+            severity: warning
+
+        # Metadata and artwork grow with the library; a full config volume
+        # stops Jellyfin writing watch state.
+        - alert: JellyfinConfigVolumeFillingUp
+          expr: |-
+            (kubelet_volume_stats_used_bytes{namespace="media", persistentvolumeclaim="jellyfin"}
+              / kubelet_volume_stats_capacity_bytes{namespace="media", persistentvolumeclaim="jellyfin"}) * 100 > 85
+          for: 30m
+          annotations:
+            summary: >-
+              Jellyfin config volume is over 85% full
+              ({{ $value | printf "%.1f" }}%)
+          labels:
+            severity: warning

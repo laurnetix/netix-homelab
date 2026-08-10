@@ -1,0 +1,23 @@
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: jellyfin
+spec:
+  interval: 1h
+  path: ./kubernetes/apps/media/jellyfin/app
+  postBuild:
+    substituteFrom:
+      - name: cluster-secrets
+        kind: Secret
+  prune: true
+  dependsOn:
+    # The NFS claim must be Bound before Jellyfin can schedule.
+    - name: media-nfs
+      namespace: media
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+    namespace: flux-system
+  targetNamespace: media
+  wait: true

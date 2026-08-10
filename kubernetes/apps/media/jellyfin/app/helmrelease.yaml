@@ -1,0 +1,108 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: jellyfin
+spec:
+  chartRef:
+    kind: OCIRepository
+    name: jellyfin
+  interval: 1h
+  values:
+    controllers:
+      jellyfin:
+        # Recreate, not RollingUpdate: the config volume is RWO, so two pods
+        # cannot hold it simultaneously.
+        strategy: Recreate
+        annotations:
+          reloader.stakater.com/auto: "true"
+        containers:
+          app:
+            image:
+              repository: ghcr.io/jellyfin/jellyfin
+              tag: 10.11.11
+            env:
+              # Advertised to clients for direct connections; without it
+              # Jellyfin guesses from the request and can hand out the
+              # in-cluster address to remote clients.
+              JELLYFIN_PublishedServerUrl: https://jellyfin.${SECRET_DOMAIN}
+              TZ: America/New_York
+            probes:
+              liveness: &probes
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /health
+                    port: &httpPort 8096
+                  # A large first-run library scan makes startup slow; be
+                  # generous before declaring the container unhealthy.
+                  initialDelaySeconds: 30
+                  periodSeconds: 30
+                  timeoutSeconds: 10
+                  failureThreshold: 6
+              readiness: *probes
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities: { drop: ["ALL"] }
+            resources:
+              requests:
+                cpu: 100m
+                memory: 512Mi
+              limits:
+                # Transcoding is CPU-bound here (no iGPU exposed on Talos yet),
+                # so memory is the only hard cap.
+                memory: 4Gi
+    defaultPodOptions:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+    persistence:
+      config:
+        existingClaim: jellyfin
+        globalMounts:
+          - path: /config
+      # Transcode scratch and image caches: regenerable, deliberately not
+      # persisted and not backed up. Node disk rather than tmpfs, since a
+      # single transcode can be several GB.
+      cache:
+        type: emptyDir
+        globalMounts:
+          - path: /cache
+      tmp:
+        type: emptyDir
+        globalMounts:
+          - path: /tmp
+      media:
+        type: persistentVolumeClaim
+        existingClaim: media-nfs
+        globalMounts:
+          - path: /data
+            # READ-ONLY. Jellyfin only ever reads the library; the *arr stack
+            # owns writes. This limits the blast radius of the one media
+            # component that is exposed to the internet.
+            readOnly: true
+    service:
+      app:
+        ports:
+          http:
+            port: *httpPort
+    route:
+      app:
+        hostnames: ["jellyfin.${SECRET_DOMAIN}"]
+        parentRefs:
+          - name: envoy-external
+            namespace: network
+            sectionName: https
+        # Deliberately NO SecurityPolicy / Authelia forward-auth on this route.
+        # Per ADR-0001, a gateway auth wall breaks every native client (Android
+        # TV, Roku, Swiftfin, mobile) and the API, because they cannot follow
+        # the browser redirect. Jellyfin's own auth is the perimeter here,
+        # hardened with a server-side 2FA plugin.
+        rules:
+          - backendRefs:
+              - identifier: app
+                port: *httpPort

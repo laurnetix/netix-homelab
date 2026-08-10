@@ -1,0 +1,18 @@
+---
+# Jellyfin's config volume: settings, users, and the metadata/artwork library it
+# builds for the ~1.1 TB on the NAS. Declared explicitly (rather than generated
+# by app-template) so the claim name is stable for the VolSync source.
+#
+# This is the ONLY Jellyfin data worth backing up. /cache is deliberately an
+# emptyDir - transcode scratch and regenerable image caches would otherwise
+# bloat every Kopia snapshot for no recovery value.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jellyfin
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: longhorn

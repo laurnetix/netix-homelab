@@ -10,3 +10,4 @@ components:
 resources:
   - ./namespace.yaml
   - ./media-nfs/ks.yaml
+  - ./jellyfin/ks.yaml
