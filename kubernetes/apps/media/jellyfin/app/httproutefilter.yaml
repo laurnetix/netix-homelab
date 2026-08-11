@@ -1,0 +1,20 @@
+---
+# Jellyfin's /metrics endpoint has NO authentication of its own - protecting it
+# is still an open upstream feature request - and Jellyfin's own documentation
+# disables metrics by default precisely to avoid "unintentionally leaking this
+# information on the public internet".
+#
+# Because Jellyfin is published externally, enabling metrics would otherwise
+# expose /metrics at https://jellyfin.${SECRET_DOMAIN}/metrics to anyone. This
+# filter returns 404 for that path at the gateway, so the endpoint is reachable
+# only in-cluster via the Service, which is exactly what Prometheus scrapes.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: HTTPRouteFilter
+metadata:
+  name: jellyfin-block-metrics
+spec:
+  directResponse:
+    statusCode: 404
+    body:
+      type: Inline
+      inline: "Not Found"

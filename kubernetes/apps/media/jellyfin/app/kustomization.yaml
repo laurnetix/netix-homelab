@@ -4,6 +4,7 @@ kind: Kustomization
 resources:
   - ./pvc.yaml
   - ./helmrelease.yaml
+  - ./httproutefilter.yaml
   - ./ocirepository.yaml
   - ./prometheusrule.yaml
   - ./volsync-jellyfin.yaml

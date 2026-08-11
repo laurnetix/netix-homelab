@@ -16,6 +16,33 @@ spec:
         strategy: Recreate
         annotations:
           reloader.stakater.com/auto: "true"
+        initContainers:
+          # Jellyfin exposes Prometheus metrics only when EnableMetrics is true
+          # in system.xml, and offers no environment variable for it
+          # (jellyfin/jellyfin#6247). system.xml lives on the config PVC and is
+          # created on first run, so this flips the flag on every start rather
+          # than relying on a one-off manual edit that no one would remember
+          # after a restore. Idempotent, and a no-op before first run.
+          enable-metrics:
+            # Reuses the Jellyfin image so there is no second image for Renovate
+            # to track and nothing extra to pull.
+            image:
+              repository: ghcr.io/jellyfin/jellyfin
+              tag: 10.11.11
+            command:
+              - sh
+              - -c
+              - |
+                F=/config/config/system.xml
+                if [ -f "$F" ]; then
+                  sed -i 's|<EnableMetrics>false</EnableMetrics>|<EnableMetrics>true</EnableMetrics>|' "$F"
+                  echo "EnableMetrics: $(grep -o '<EnableMetrics>[a-z]*</EnableMetrics>' "$F")"
+                else
+                  echo "system.xml not present yet (first run); nothing to do"
+                fi
+            securityContext:
+              allowPrivilegeEscalation: false
+              capabilities: { drop: ["ALL"] }
         containers:
           app:
             image:
@@ -90,6 +117,15 @@ spec:
         ports:
           http:
             port: *httpPort
+    serviceMonitor:
+      app:
+        endpoints:
+          # Jellyfin serves metrics on the SAME port as the web UI, which is why
+          # the gateway has to block the path externally (see httproutefilter).
+          # Prometheus reaches it in-cluster via the Service, bypassing that.
+          - port: http
+            path: /metrics
+            interval: 1m
     route:
       app:
         hostnames: ["jellyfin.${SECRET_DOMAIN}"]
@@ -103,6 +139,18 @@ spec:
         # the browser redirect. Jellyfin's own auth is the perimeter here,
         # hardened with a server-side 2FA plugin.
         rules:
+          # More specific match wins: /metrics is answered with a 404 at the
+          # gateway so the unauthenticated endpoint is never publicly reachable.
+          - matches:
+              - path:
+                  type: PathPrefix
+                  value: /metrics
+            filters:
+              - type: ExtensionRef
+                extensionRef:
+                  group: gateway.envoyproxy.io
+                  kind: HTTPRouteFilter
+                  name: jellyfin-block-metrics
           - backendRefs:
               - identifier: app
                 port: *httpPort
