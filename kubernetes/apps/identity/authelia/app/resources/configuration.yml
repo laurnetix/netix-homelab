@@ -103,9 +103,32 @@ identity_providers:
   oidc:
     jwks:
       - key: {{ secret "/secrets/oidc-jwks.pem" | mindent 10 "|" | msquote }}
+    # Authelia 4.39 deliberately narrowed ID Tokens to the standard claims from
+    # the specification, expecting clients to call /userinfo for anything more.
+    # JellyfinSecurity does NOT call /userinfo - verified by zero requests to
+    # that endpoint - and reads everything from the ID Token, so without this
+    # policy it sees no groups (rejecting sign-in with "not in an allowed
+    # group"), no username, and no email to link on.
+    #
+    # Every claim listed here is one the plugin actually consumes:
+    #   groups            -> Allowed groups / Admin groups mapping
+    #   preferred_username-> the Username claim setting (LLDAP uid)
+    #   email, email_verified -> verified-email account linking
+    #   name              -> display name on the created account
+    claims_policies:
+      jellyfin:
+        id_token:
+          - 'groups'
+          - 'preferred_username'
+          - 'email'
+          - 'email_verified'
+          - 'name'
     clients:
       - client_id: 'jellyfin'
         client_name: 'Jellyfin'
+        # Attaches the claims policy above so the ID Token actually carries the
+        # claims this client reads.
+        claims_policy: 'jellyfin'
         # PBKDF2 digest, not the plaintext. Jellyfin's SSO plugin holds the
         # plaintext counterpart.
         client_secret: {{ secret "/secrets/jellyfin-client-secret.digest" | msquote }}
