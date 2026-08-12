@@ -131,6 +131,15 @@ identity_providers:
         scopes:
           - 'openid'
           - 'profile'
+          # Required by JellyfinSecurity: its account-linking sequence matches a
+          # VERIFIED email against an existing Jellyfin user before falling back
+          # to username matching. Omitting this scope makes Authelia reject the
+          # authorization request outright with "not allowed to request scope
+          # 'email'", which the plugin surfaces only as a generic
+          # "rejected by the identity provider".
+          # Also aligns with ADR-0001 decision 2: email is the identity key
+          # applications link on, so the IdP must actually be able to assert it.
+          - 'email'
           # Carries LLDAP group membership so the plugin can map admins/members
           # onto Jellyfin roles. Groups stay defined in LLDAP only (ADR-0001).
           - 'groups'
