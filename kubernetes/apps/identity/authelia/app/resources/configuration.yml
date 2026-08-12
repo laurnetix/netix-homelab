@@ -117,8 +117,16 @@ identity_providers:
         require_pkce: true
         pkce_challenge_method: 'S256'
         redirect_uris:
-          # Path is fixed by jellyfin-plugin-sso: /sso/OID/redirect/<provider>,
-          # where the provider is named "authelia" in the plugin config.
+          # ADR-0003 Stage 1: both plugins registered at once so they can run in
+          # parallel during the migration. jellyfin-plugin-sso is removed at
+          # Stage 3, at which point its URI below should be deleted.
+          #
+          # JellyfinSecurity. The final segment is a slug derived from the
+          # plugin's Display name ("Authelia" -> "authelia"); a mismatch returns
+          # redirect_uri_mismatch.
+          - 'https://jellyfin.${SECRET_DOMAIN}/TwoFactorAuth/Oidc/Callback/authelia'
+          # jellyfin-plugin-sso (legacy, remove at Stage 3). Path is fixed by
+          # that plugin: /sso/OID/redirect/<provider>.
           - 'https://jellyfin.${SECRET_DOMAIN}/sso/OID/redirect/authelia'
         scopes:
           - 'openid'
