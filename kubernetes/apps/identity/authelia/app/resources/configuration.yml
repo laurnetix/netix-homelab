@@ -140,17 +140,10 @@ identity_providers:
         require_pkce: true
         pkce_challenge_method: 'S256'
         redirect_uris:
-          # ADR-0003 Stage 1: both plugins registered at once so they can run in
-          # parallel during the migration. jellyfin-plugin-sso is removed at
-          # Stage 3, at which point its URI below should be deleted.
-          #
-          # JellyfinSecurity. The final segment is a slug derived from the
-          # plugin's Display name ("Authelia" -> "authelia"); a mismatch returns
-          # redirect_uri_mismatch.
+          # JellyfinSecurity is now the sole auth plugin (ADR-0003 complete).
+          # The final segment is a slug derived from the plugin's Display name
+          # ("Authelia" -> "authelia"); a mismatch returns redirect_uri_mismatch.
           - 'https://jellyfin.${SECRET_DOMAIN}/TwoFactorAuth/Oidc/Callback/authelia'
-          # jellyfin-plugin-sso (legacy, remove at Stage 3). Path is fixed by
-          # that plugin: /sso/OID/redirect/<provider>.
-          - 'https://jellyfin.${SECRET_DOMAIN}/sso/OID/redirect/authelia'
         scopes:
           - 'openid'
           - 'profile'
@@ -172,17 +165,8 @@ identity_providers:
           - 'authorization_code'
         access_token_signed_response_alg: 'none'
         userinfo_signed_response_alg: 'none'
-        # jellyfin-plugin-sso uses DIFFERENT client authentication per endpoint:
-        # client_secret_basic for Pushed Authorization Requests, but
-        # client_secret_post for the token endpoint. Authelia allows only one
-        # value per client, so neither setting satisfies both - setting 'basic'
-        # gets past PAR and then fails at token redemption, and 'post' fails at
-        # PAR. There is no value that works while PAR is in play.
-        #
-        # The resolution is to take PAR out of the flow entirely by enabling
-        # "DisablePushedAuthorization" in the Jellyfin plugin. Only the token
-        # endpoint is then used, so this MUST be client_secret_post - which is
-        # what Authelia's own Jellyfin integration guide specifies.
-        #
-        # Both halves are required. Reverting either one breaks SSO login.
+        # JellyfinSecurity authenticates to the token endpoint with
+        # client_secret_post. It does not implement Pushed Authorization
+        # Requests at all, so unlike the previous plugin there is no second
+        # endpoint using a conflicting method - see ADR-0003 for the history.
         token_endpoint_auth_method: 'client_secret_post'
