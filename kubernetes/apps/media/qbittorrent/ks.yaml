@@ -1,0 +1,23 @@
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: qbittorrent
+spec:
+  interval: 1h
+  path: ./kubernetes/apps/media/qbittorrent/app
+  postBuild:
+    substituteFrom:
+      - name: cluster-secrets
+        kind: Secret
+  prune: true
+  dependsOn:
+    # Downloads land on the NFS share; the claim must be Bound first.
+    - name: media-nfs
+      namespace: media
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+    namespace: flux-system
+  targetNamespace: media
+  wait: true

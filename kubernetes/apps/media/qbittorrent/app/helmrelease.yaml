@@ -1,0 +1,147 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: qbittorrent
+spec:
+  chartRef:
+    kind: OCIRepository
+    name: qbittorrent
+  interval: 1h
+  values:
+    controllers:
+      qbittorrent:
+        # Recreate: the config volume is RWO, and two qBittorrent instances must
+        # never hold the same torrent state simultaneously.
+        strategy: Recreate
+        annotations:
+          reloader.stakater.com/auto: "true"
+        containers:
+          app:
+            image:
+              # Upstream-stable 5.2.3. The reference repo uses a personal fork
+              # (qbittorrent-brr); the standard home-operations build is the
+              # better default here.
+              repository: ghcr.io/home-operations/qbittorrent
+              tag: 5.2.3
+            env:
+              QBT_WEBUI_PORT: &port 8080
+              # Fixed torrent listening port. Must match any router port-forward
+              # for inbound peer connections - see qbittorrent-lb.yaml.
+              QBT_TORRENTING_PORT: &torrentPort 50413
+              TZ: America/New_York
+            probes:
+              liveness: &probes
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /api/v2/app/version
+                    port: *port
+                  initialDelaySeconds: 20
+                  periodSeconds: 30
+                  timeoutSeconds: 10
+                  failureThreshold: 4
+              readiness: *probes
+              # Rechecking a large torrent set on start can take minutes; allow
+              # up to 5 before declaring failure.
+              startup:
+                enabled: true
+                spec:
+                  periodSeconds: 10
+                  failureThreshold: 30
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: { drop: ["ALL"] }
+            resources:
+              requests:
+                cpu: 100m
+                memory: 256Mi
+              limits:
+                # Grows with active torrent count and disk cache. Generous for a
+                # family library without letting it starve the node.
+                memory: 4Gi
+    defaultPodOptions:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+    persistence:
+      config:
+        existingClaim: qbittorrent
+        globalMounts:
+          - path: /config
+      # NOTE: deliberately NO separate mount for /config/qBittorrent/logs.
+      # Mounting there makes kubelet create /config/qBittorrent as the mount
+      # point, owned by root - so qBittorrent (UID 1000) cannot write its
+      # qBittorrent.conf into it and exits immediately with
+      # "cp: cannot create regular file ... Permission denied" followed by a
+      # misleading "Another qBittorrent instance is already running".
+      # Logs therefore live in the config PVC. They are small and rotate, so
+      # the only cost is a little extra churn in the hourly backup.
+      tmp:
+        type: emptyDir
+        globalMounts:
+          - path: /tmp
+      # CRITICAL: /data, the SAME path as Sonarr and Radarr. qBittorrent writes
+      # completed downloads to /data/torrents/complete, and the *arr apps then
+      # hardlink them into /data/video/*. If the paths differ between these
+      # pods, the *arr apps silently fall back to copying - doubling disk usage
+      # and breaking seeding (ADR-0002 Decision 3).
+      media:
+        type: persistentVolumeClaim
+        existingClaim: media-nfs
+        globalMounts:
+          - path: /data
+    service:
+      app:
+        ports:
+          http:
+            port: *port
+      # Separate LoadBalancer purely for the BitTorrent listening port, so peers
+      # can open connections INBOUND. Without this qBittorrent shows as "not
+      # connectable": it can only reach peers that connect out to it, which
+      # measurably hurts seeding - and therefore ratio on private trackers.
+      #
+      # The WebUI deliberately stays off this service; it remains internal-only
+      # via the HTTPRoute below.
+      #
+      # REQUIRES a matching router port-forward of TCP+UDP 50413 to this IP.
+      # Without the forward the service exists but nothing reaches it.
+      #
+      # externalTrafficPolicy: Local preserves the real peer source IP. With
+      # Cluster, peers would appear to come from a node IP, which confuses
+      # BitTorrent peer accounting.
+      bittorrent:
+        controller: qbittorrent
+        type: LoadBalancer
+        externalTrafficPolicy: Local
+        annotations:
+          # Next free address in the Cilium pool (.250/.253/.254 in use).
+          lbipam.cilium.io/ips: "192.168.0.252"
+        ports:
+          bittorrent-tcp:
+            enabled: true
+            port: *torrentPort
+            protocol: TCP
+          # uTP and DHT ride on UDP; omitting it degrades peer discovery.
+          bittorrent-udp:
+            enabled: true
+            port: *torrentPort
+            protocol: UDP
+    route:
+      app:
+        hostnames: ["qbittorrent.${SECRET_DOMAIN}"]
+        parentRefs:
+          # INTERNAL ONLY - this line is what keeps the WebUI off the public
+          # internet. Note qBittorrent has its own login regardless.
+          - name: envoy-internal
+            namespace: network
+            sectionName: https
+        rules:
+          - backendRefs:
+              - identifier: app
+                port: *port

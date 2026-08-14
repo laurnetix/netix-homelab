@@ -1,0 +1,45 @@
+---
+# qBittorrent exposes no Prometheus endpoint; exportarr is the ecosystem answer and
+# is worth adding once the whole stack is up. Until then these are built on
+# kube-state-metrics and VolSync.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: qbittorrent
+spec:
+  groups:
+    - name: qbittorrent.rules
+      rules:
+        - alert: qBittorrentDown
+          expr: |-
+            kube_deployment_status_replicas_available{namespace="media", deployment="qbittorrent"} == 0
+          for: 15m
+          annotations:
+            summary: >-
+              qBittorrent has had no available replica for 15m - downloads have
+              stopped and nothing is seeding
+          labels:
+            severity: warning
+
+        - alert: qBittorrentBackupNotRunning
+          expr: |-
+            increase(volsync_sync_duration_seconds_count{obj_namespace="media", obj_name="qbittorrent", role="source"}[6h]) == 0
+          for: 1h
+          annotations:
+            summary: >-
+              qBittorrent has completed no VolSync backup in 6h - torrent state
+              and resume data are unprotected
+          labels:
+            severity: warning
+
+        - alert: qBittorrentConfigVolumeFillingUp
+          expr: |-
+            (kubelet_volume_stats_used_bytes{namespace="media", persistentvolumeclaim="qbittorrent"}
+              / kubelet_volume_stats_capacity_bytes{namespace="media", persistentvolumeclaim="qbittorrent"}) * 100 > 85
+          for: 30m
+          annotations:
+            summary: >-
+              qBittorrent config volume is over 85% full
+              ({{ $value | printf "%.1f" }}%)
+          labels:
+            severity: warning

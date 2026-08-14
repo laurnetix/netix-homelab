@@ -1,0 +1,15 @@
+---
+# qBittorrent's config: torrent state (.torrent files and resume data for every
+# active torrent), categories, and settings. Losing this means re-adding and
+# re-checking every torrent, and losing seeding history - so it is backed up
+# even though the downloaded data itself is not (ADR-0002).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: qbittorrent
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: longhorn
