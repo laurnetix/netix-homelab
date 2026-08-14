@@ -6,7 +6,9 @@ resources:
   - ./cluster.yaml
   - ./helmrelease.yaml
   - ./ocirepository.yaml
+  - ./postgres-dump.yaml
   - ./prometheusrule.yaml
+  - ./volsync-postgres-dump.yaml
 configMapGenerator:
   - name: authelia-configmap
     files:

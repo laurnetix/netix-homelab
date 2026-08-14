@@ -1,0 +1,115 @@
+---
+# Offsite protection for Authelia's PostgreSQL.
+#
+# CNPG's own ScheduledBackup takes daily Longhorn volume snapshots, but those
+# live *inside the cluster* - losing Longhorn or the cluster loses them too.
+# Every other stateful app reaches the NAS and C2 through VolSync/Kopia, and the
+# Postgres PVCs were the one gap.
+#
+# Rather than backing up the live PGDATA volume (a filesystem snapshot of a
+# running database is only crash-consistent), this dumps the database with
+# pg_dump - application-consistent by definition - into a small PVC that has its
+# own ReplicationSource. The dump then rides the existing
+# Kopia -> NAS -> C2 chain like everything else.
+#
+# What this protects: TOTP enrolments, WebAuthn credentials, OAuth consents.
+# NOT user accounts - those live in LLDAP (ADR-0001), which is already backed up.
+#
+# RESTORE: recreate the CNPG Cluster (which creates the authelia role and empty
+# database), then:
+#   gunzip -c authelia.sql.gz | psql -h authelia-postgres-rw -U authelia authelia
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: authelia-postgres-dump
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      # The database is a few MB; 1Gi is generous even compressed uncompressed.
+      storage: 1Gi
+  storageClassName: longhorn
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: authelia-postgres-dump
+spec:
+  # 03:15 daily - ahead of the 04:00 VolSync run so the fresh dump is captured
+  # the same morning, and clear of CNPG's own 03:30 snapshot.
+  schedule: "15 3 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # Surface a persistent failure rather than retrying silently forever.
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            fsGroup: 1000
+            fsGroupChangePolicy: OnRootMismatch
+          containers:
+            - name: dump
+              # Same image as the cluster itself, so pg_dump always matches the
+              # server version. pg_dump refuses to run against a newer server.
+              image: ghcr.io/cloudnative-pg/postgresql:18.4-system-trixie
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+              env:
+                # CNPG generates and owns this secret; referencing it means the
+                # credential exists in exactly one place.
+                - name: PGHOST
+                  valueFrom:
+                    secretKeyRef: { name: authelia-postgres-app, key: host }
+                - name: PGPORT
+                  valueFrom:
+                    secretKeyRef: { name: authelia-postgres-app, key: port }
+                - name: PGUSER
+                  valueFrom:
+                    secretKeyRef: { name: authelia-postgres-app, key: username }
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef: { name: authelia-postgres-app, key: password }
+                - name: PGDATABASE
+                  valueFrom:
+                    secretKeyRef: { name: authelia-postgres-app, key: dbname }
+              command:
+                - bash
+                - -c
+                - |
+                  set -euo pipefail
+                  umask 077
+                  OUT=/dumps/authelia.sql.gz
+                  TMP=/dumps/.authelia.sql.gz.tmp
+                  # Write to a temp file and rename only on success. Without
+                  # this, a failure mid-dump would leave a truncated file that
+                  # the next VolSync run would faithfully back up.
+                  pg_dump --format=plain --no-owner --no-privileges \
+                    | gzip -9 > "$TMP"
+                  mv -f "$TMP" "$OUT"
+                  echo "dump complete: $(stat -c '%s bytes, mtime %y' "$OUT")"
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 64Mi
+                limits:
+                  memory: 256Mi
+              volumeMounts:
+                - name: dumps
+                  mountPath: /dumps
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: dumps
+              persistentVolumeClaim:
+                claimName: authelia-postgres-dump
+            - name: tmp
+              emptyDir: {}
