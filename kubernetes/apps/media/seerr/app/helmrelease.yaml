@@ -1,0 +1,111 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: seerr
+spec:
+  chartRef:
+    kind: OCIRepository
+    name: seerr
+  interval: 1h
+  # The seerr image is large and slow to pull - measured at ~12 minutes on a
+  # cold node. Helm's default 5m timeout expires mid-pull, so the first install
+  # fails and only succeeds on a later retry. 20m covers it on the first pass.
+  timeout: 20m
+  values:
+    controllers:
+      seerr:
+        # Recreate: the config volume is RWO.
+        strategy: Recreate
+        annotations:
+          reloader.stakater.com/auto: "true"
+        containers:
+          app:
+            image:
+              # Unified successor to Overseerr and Jellyseerr; supports Jellyfin,
+              # Plex and Emby in one codebase.
+              repository: ghcr.io/seerr-team/seerr
+              tag: v3.4.1
+            env:
+              PORT: &port 5055
+              TZ: America/New_York
+              LOG_LEVEL: info
+            probes:
+              liveness: &probes
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /api/v1/status
+                    port: *port
+                  initialDelaySeconds: 30
+                  periodSeconds: 30
+                  timeoutSeconds: 10
+                  failureThreshold: 5
+              readiness: *probes
+            securityContext:
+              allowPrivilegeEscalation: false
+              # NOT read-only: seerr writes its SQLite database, cache and
+              # generated config under /app/config at runtime. Verified by
+              # pre-flight test rather than assumed.
+              readOnlyRootFilesystem: false
+              capabilities: { drop: ["ALL"] }
+            resources:
+              requests:
+                cpu: 25m
+                memory: 256Mi
+              limits:
+                memory: 1Gi
+    defaultPodOptions:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+    persistence:
+      config:
+        existingClaim: seerr
+        globalMounts:
+          # seerr expects its config directory at /app/config, not /config.
+          - path: /app/config
+    service:
+      app:
+        ports:
+          http:
+            port: *port
+    route:
+      app:
+        hostnames: ["seerr.${SECRET_DOMAIN}"]
+        parentRefs:
+          # EXTERNAL by design - this is the request portal family members use
+          # from outside the house. One of only two externally published
+          # services, alongside Jellyfin.
+          #
+          # Authentication: DELIBERATELY NO SecurityPolicy / forward-auth.
+          #
+          # seerr's stable releases support media-server sign-in (Jellyfin
+          # credentials) or local accounts. Native OIDC is NOT in a stable
+          # release - it lives in an experimental preview branch with known
+          # account-linking defects - so the Authelia OIDC client pattern used
+          # for Jellyfin does not apply here.
+          #
+          # Decision: use seerr's native Jellyfin sign-in rather than fronting it
+          # with Authelia forward-auth. It is the flow seerr is built around,
+          # avoids a double login, and introduces no new credential - family
+          # members already need a Jellyfin password for TV and mobile clients,
+          # which cannot use SSO. Those Jellyfin accounts are themselves
+          # provisioned from LLDAP, so identity still originates in the
+          # directory.
+          #
+          # Accepted trade-off: no second factor on the seerr login itself.
+          # Blast radius is limited to media requests. Revisit if seerr ships
+          # stable OIDC, or by adding a SecurityPolicy later - the manifests
+          # need no other change.
+          - name: envoy-external
+            namespace: network
+            sectionName: https
+        rules:
+          - backendRefs:
+              - identifier: app
+                port: *port

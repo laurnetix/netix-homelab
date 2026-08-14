@@ -1,0 +1,14 @@
+---
+# seerr's config: users, request history, and its link to Jellyfin/Sonarr/Radarr.
+# Request history is the part worth keeping - it is the record of who asked for
+# what, and nothing else reproduces it.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: seerr
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: longhorn
