@@ -112,13 +112,23 @@ spec:
       # REQUIRES a matching router port-forward of TCP+UDP 50413 to this IP.
       # Without the forward the service exists but nothing reaches it.
       #
-      # externalTrafficPolicy: Local preserves the real peer source IP. With
-      # Cluster, peers would appear to come from a node IP, which confuses
-      # BitTorrent peer accounting.
+      # externalTrafficPolicy MUST be Cluster here, despite Local being the
+      # usual choice for preserving peer source IPs.
+      #
+      # The CiliumL2AnnouncementPolicy in this cluster has no service selector,
+      # so every node may answer ARP for a LoadBalancer IP. With Local, only the
+      # node actually running the pod can serve traffic - so whenever a
+      # different node wins the announcement the connection is reset
+      # ("Connection refused"), and it silently breaks again every time the pod
+      # reschedules onto another node.
+      #
+      # Cluster costs source-IP visibility (peers appear to arrive from a node
+      # IP) but is the only reliable option until the L2 policy is scoped per
+      # service. Reconsider if that changes.
       bittorrent:
         controller: qbittorrent
         type: LoadBalancer
-        externalTrafficPolicy: Local
+        externalTrafficPolicy: Cluster
         annotations:
           # Next free address in the Cilium pool (.250/.253/.254 in use).
           lbipam.cilium.io/ips: "192.168.0.252"
