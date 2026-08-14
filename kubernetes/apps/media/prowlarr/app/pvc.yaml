@@ -1,0 +1,18 @@
+---
+# Prowlarr's config: indexer definitions, credentials for each tracker, and the
+# app-sync settings that push indexers out to Sonarr and Radarr. Small, but the
+# most tedious thing in the stack to rebuild by hand - every indexer would have
+# to be re-added and re-authenticated - so it is backed up.
+#
+# Note there is deliberately no media mount: Prowlarr manages indexers and never
+# touches the library or downloads.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prowlarr
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 2Gi
+  storageClassName: longhorn

@@ -1,0 +1,108 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: prowlarr
+spec:
+  chartRef:
+    kind: OCIRepository
+    name: prowlarr
+  interval: 1h
+  values:
+    controllers:
+      prowlarr:
+        # Recreate: the config volume is RWO, so two pods cannot hold it at once.
+        strategy: Recreate
+        annotations:
+          reloader.stakater.com/auto: "true"
+        containers:
+          app:
+            image:
+              repository: ghcr.io/home-operations/prowlarr
+              # Stable branch. The reference repo tracks `develop` (2.6.x); for a
+              # family setup the stable line is the better default, and the
+              # UPDATE__BRANCH below is set to match so in-app update prompts
+              # don't offer builds this tag will never receive.
+              tag: 2.5.2.5491
+            env:
+              PROWLARR__APP__INSTANCENAME: Prowlarr
+              PROWLARR__APP__THEME: dark
+              PROWLARR__LOG__LEVEL: info
+              PROWLARR__SERVER__PORT: &port 9696
+              PROWLARR__UPDATE__BRANCH: master
+              TZ: America/New_York
+              # No login on the UI. This is safe ONLY because the route below is
+              # internal-only: split-horizon DNS keeps it off the internet, and
+              # reaching it from outside the house requires Tailnet membership.
+              # Per ADR-0001, internal services carry no gateway auth.
+              # The API key above is still a real credential and is not affected.
+              PROWLARR__AUTH__METHOD: External
+              PROWLARR__AUTH__REQUIRED: DisabledForLocalAddresses
+            envFrom:
+              - secretRef:
+                  name: "{{ .Release.Name }}-secret"
+            probes:
+              liveness: &probes
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /ping
+                    port: *port
+                  initialDelaySeconds: 10
+                  periodSeconds: 30
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+              readiness: *probes
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: { drop: ["ALL"] }
+            resources:
+              requests:
+                cpu: 10m
+                memory: 128Mi
+              limits:
+                memory: 512Mi
+    defaultPodOptions:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+    persistence:
+      config:
+        existingClaim: prowlarr
+        globalMounts:
+          - path: /config
+      # readOnlyRootFilesystem is on, and *arr apps write logs and scratch
+      # outside the config database. Both are regenerable, so tmpfs rather than
+      # persisted volumes - this also keeps the backup free of log churn.
+      logs:
+        type: emptyDir
+        globalMounts:
+          - path: /config/logs
+      tmp:
+        type: emptyDir
+        globalMounts:
+          - path: /tmp
+    service:
+      app:
+        ports:
+          http:
+            port: *port
+    route:
+      app:
+        hostnames: ["prowlarr.${SECRET_DOMAIN}"]
+        parentRefs:
+          # INTERNAL ONLY. This single line is what keeps an unauthenticated
+          # admin UI off the public internet - do not change it to
+          # envoy-external without adding authentication first.
+          - name: envoy-internal
+            namespace: network
+            sectionName: https
+        rules:
+          - backendRefs:
+              - identifier: app
+                port: *port

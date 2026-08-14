@@ -1,0 +1,52 @@
+---
+# Prowlarr exposes no Prometheus endpoint of its own. The usual answer in this
+# ecosystem is exportarr, a sidecar that polls the *arr API and translates it to
+# metrics - worth adding once the whole stack is up and there is something
+# meaningful to chart across apps. Until then these alerts are built on
+# kube-state-metrics and VolSync, same approach as LLDAP and Jellyfin.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: prowlarr
+spec:
+  groups:
+    - name: prowlarr.rules
+      rules:
+        # Prowlarr is the indexer source for the whole stack: while it is down,
+        # Sonarr and Radarr cannot search, though existing downloads continue.
+        # Internal-only and non-urgent, hence warning rather than critical.
+        - alert: ProwlarrDown
+          expr: |-
+            kube_deployment_status_replicas_available{namespace="media", deployment="prowlarr"} == 0
+          for: 15m
+          annotations:
+            summary: >-
+              Prowlarr has had no available replica for 15m - indexer searches
+              will fail for Sonarr and Radarr
+          labels:
+            severity: warning
+
+        # Indexer definitions and per-tracker credentials are tedious to rebuild
+        # by hand, which is the whole reason this volume is backed up.
+        - alert: ProwlarrBackupNotRunning
+          expr: |-
+            increase(volsync_sync_duration_seconds_count{obj_namespace="media", obj_name="prowlarr", role="source"}[6h]) == 0
+          for: 1h
+          annotations:
+            summary: >-
+              Prowlarr has completed no VolSync backup in 6h - indexer
+              configuration is unprotected
+          labels:
+            severity: warning
+
+        - alert: ProwlarrConfigVolumeFillingUp
+          expr: |-
+            (kubelet_volume_stats_used_bytes{namespace="media", persistentvolumeclaim="prowlarr"}
+              / kubelet_volume_stats_capacity_bytes{namespace="media", persistentvolumeclaim="prowlarr"}) * 100 > 85
+          for: 30m
+          annotations:
+            summary: >-
+              Prowlarr config volume is over 85% full
+              ({{ $value | printf "%.1f" }}%)
+          labels:
+            severity: warning
