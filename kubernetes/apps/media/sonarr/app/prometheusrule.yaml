@@ -1,0 +1,45 @@
+---
+# Sonarr exposes no Prometheus endpoint; exportarr is the ecosystem answer and
+# is worth adding once the whole stack is up. Until then these are built on
+# kube-state-metrics and VolSync.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: sonarr
+spec:
+  groups:
+    - name: sonarr.rules
+      rules:
+        - alert: SonarrDown
+          expr: |-
+            kube_deployment_status_replicas_available{namespace="media", deployment="sonarr"} == 0
+          for: 15m
+          annotations:
+            summary: >-
+              Sonarr has had no available replica for 15m - TV downloads and
+              imports have stopped
+          labels:
+            severity: warning
+
+        - alert: SonarrBackupNotRunning
+          expr: |-
+            increase(volsync_sync_duration_seconds_count{obj_namespace="media", obj_name="sonarr", role="source"}[6h]) == 0
+          for: 1h
+          annotations:
+            summary: >-
+              Sonarr has completed no VolSync backup in 6h - series library and
+              quality profiles are unprotected
+          labels:
+            severity: warning
+
+        - alert: SonarrConfigVolumeFillingUp
+          expr: |-
+            (kubelet_volume_stats_used_bytes{namespace="media", persistentvolumeclaim="sonarr"}
+              / kubelet_volume_stats_capacity_bytes{namespace="media", persistentvolumeclaim="sonarr"}) * 100 > 85
+          for: 30m
+          annotations:
+            summary: >-
+              Sonarr config volume is over 85% full
+              ({{ $value | printf "%.1f" }}%)
+          labels:
+            severity: warning

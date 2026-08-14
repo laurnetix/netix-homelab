@@ -1,0 +1,111 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: radarr
+spec:
+  chartRef:
+    kind: OCIRepository
+    name: radarr
+  interval: 1h
+  values:
+    controllers:
+      radarr:
+        # Recreate: the config volume is RWO, so two pods cannot hold it at once.
+        strategy: Recreate
+        annotations:
+          reloader.stakater.com/auto: "true"
+        containers:
+          app:
+            image:
+              repository: ghcr.io/home-operations/radarr
+              # Upstream-stable build (6.3.0.10514 is the newest release NOT
+              # flagged prerelease). Unlike Sonarr, home-operations does publish
+              # Radarr's stable tags, so we take them.
+              tag: 6.3.0.10514
+            env:
+              RADARR__APP__INSTANCENAME: Radarr
+              RADARR__APP__THEME: dark
+              RADARR__LOG__LEVEL: info
+              RADARR__SERVER__PORT: &port 7878
+              RADARR__UPDATE__BRANCH: master
+              TZ: America/New_York
+              # No UI login - safe only because the route below is internal-only
+              # (ADR-0001). The API key remains a real credential.
+              RADARR__AUTH__METHOD: External
+              RADARR__AUTH__REQUIRED: DisabledForLocalAddresses
+            envFrom:
+              - secretRef:
+                  name: "{{ .Release.Name }}-secret"
+            probes:
+              liveness: &probes
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /ping
+                    port: *port
+                  # First start scans the existing ~1.1 TB library; be generous.
+                  initialDelaySeconds: 30
+                  periodSeconds: 30
+                  timeoutSeconds: 10
+                  failureThreshold: 6
+              readiness: *probes
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: { drop: ["ALL"] }
+            resources:
+              requests:
+                cpu: 25m
+                memory: 256Mi
+              limits:
+                memory: 2Gi
+    defaultPodOptions:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+    persistence:
+      config:
+        existingClaim: radarr
+        globalMounts:
+          - path: /config
+      logs:
+        type: emptyDir
+        globalMounts:
+          - path: /config/logs
+      tmp:
+        type: emptyDir
+        globalMounts:
+          - path: /tmp
+      # CRITICAL: mounted at /data, the SAME path as every other media pod.
+      # Downloads and the library must appear on one filesystem at one path or
+      # imports silently fall back to copying instead of hardlinking - doubling
+      # disk usage and breaking seeding (ADR-0002 Decision 3).
+      # Read-write here: Radarr renames and hardlinks into the library.
+      media:
+        type: persistentVolumeClaim
+        existingClaim: media-nfs
+        globalMounts:
+          - path: /data
+    service:
+      app:
+        ports:
+          http:
+            port: *port
+    route:
+      app:
+        hostnames: ["radarr.${SECRET_DOMAIN}"]
+        parentRefs:
+          # INTERNAL ONLY - this line is what keeps an unauthenticated admin UI
+          # off the public internet.
+          - name: envoy-internal
+            namespace: network
+            sectionName: https
+        rules:
+          - backendRefs:
+              - identifier: app
+                port: *port

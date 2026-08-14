@@ -1,0 +1,14 @@
+---
+# Sonarr's config: series library, quality profiles, indexer links pushed from
+# Prowlarr, and import history. Rebuilding by hand would mean re-adding every
+# series and re-matching the existing library, so it is backed up.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sonarr
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: longhorn

@@ -1,0 +1,13 @@
+---
+# Radarr's config: movie library, quality profiles, indexer links pushed from
+# Prowlarr, and import history.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: radarr
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: longhorn

@@ -12,3 +12,5 @@ resources:
   - ./media-nfs/ks.yaml
   - ./jellyfin/ks.yaml
   - ./prowlarr/ks.yaml
+  - ./sonarr/ks.yaml
+  - ./radarr/ks.yaml

@@ -1,0 +1,115 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: sonarr
+spec:
+  chartRef:
+    kind: OCIRepository
+    name: sonarr
+  interval: 1h
+  values:
+    controllers:
+      sonarr:
+        # Recreate: the config volume is RWO, so two pods cannot hold it at once.
+        strategy: Recreate
+        annotations:
+          reloader.stakater.com/auto: "true"
+        containers:
+          app:
+            image:
+              repository: ghcr.io/home-operations/sonarr
+              # NOTE: unlike Prowlarr and Radarr, this is NOT an upstream-stable
+              # build. home-operations does not publish Sonarr's stable build
+              # numbers (their tags run 2991/2995/3001; upstream stable is
+              # 2979), so the newest they offer is the only option. Sonarr marks
+              # these as prereleases on GitHub, but this is the branch the
+              # home-ops ecosystem runs universally. Revisit if a stable tag
+              # ever appears.
+              tag: 4.0.19.3001
+            env:
+              SONARR__APP__INSTANCENAME: Sonarr
+              SONARR__APP__THEME: dark
+              SONARR__LOG__LEVEL: info
+              SONARR__SERVER__PORT: &port 8989
+              SONARR__UPDATE__BRANCH: main
+              TZ: America/New_York
+              # No UI login - safe only because the route below is internal-only
+              # (ADR-0001). The API key remains a real credential.
+              SONARR__AUTH__METHOD: External
+              SONARR__AUTH__REQUIRED: DisabledForLocalAddresses
+            envFrom:
+              - secretRef:
+                  name: "{{ .Release.Name }}-secret"
+            probes:
+              liveness: &probes
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /ping
+                    port: *port
+                  # First start scans the existing ~1.1 TB library; be generous.
+                  initialDelaySeconds: 30
+                  periodSeconds: 30
+                  timeoutSeconds: 10
+                  failureThreshold: 6
+              readiness: *probes
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: { drop: ["ALL"] }
+            resources:
+              requests:
+                cpu: 25m
+                memory: 256Mi
+              limits:
+                memory: 2Gi
+    defaultPodOptions:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+    persistence:
+      config:
+        existingClaim: sonarr
+        globalMounts:
+          - path: /config
+      logs:
+        type: emptyDir
+        globalMounts:
+          - path: /config/logs
+      tmp:
+        type: emptyDir
+        globalMounts:
+          - path: /tmp
+      # CRITICAL: mounted at /data, the SAME path as every other media pod.
+      # Downloads and the library must appear on one filesystem at one path or
+      # imports silently fall back to copying instead of hardlinking - doubling
+      # disk usage and breaking seeding (ADR-0002 Decision 3).
+      # Read-write here: Sonarr renames and hardlinks into the library.
+      media:
+        type: persistentVolumeClaim
+        existingClaim: media-nfs
+        globalMounts:
+          - path: /data
+    service:
+      app:
+        ports:
+          http:
+            port: *port
+    route:
+      app:
+        hostnames: ["sonarr.${SECRET_DOMAIN}"]
+        parentRefs:
+          # INTERNAL ONLY - this line is what keeps an unauthenticated admin UI
+          # off the public internet.
+          - name: envoy-internal
+            namespace: network
+            sectionName: https
+        rules:
+          - backendRefs:
+              - identifier: app
+                port: *port
