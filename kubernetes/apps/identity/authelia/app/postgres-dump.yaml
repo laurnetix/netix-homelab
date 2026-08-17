@@ -58,7 +58,7 @@ spec:
             - name: dump
               # Same image as the cluster itself, so pg_dump always matches the
               # server version. pg_dump refuses to run against a newer server.
-              image: ghcr.io/cloudnative-pg/postgresql:18.4-system-trixie
+              image: ghcr.io/cloudnative-pg/postgresql:18.6-system-trixie
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true
