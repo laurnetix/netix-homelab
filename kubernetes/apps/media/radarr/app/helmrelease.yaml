@@ -22,7 +22,7 @@ spec:
               # Upstream-stable build (6.3.0.10514 is the newest release NOT
               # flagged prerelease). Unlike Sonarr, home-operations does publish
               # Radarr's stable tags, so we take them.
-              tag: 6.3.0.10514
+              tag: 6.4.1.10545
             env:
               RADARR__APP__INSTANCENAME: Radarr
               RADARR__APP__THEME: dark
