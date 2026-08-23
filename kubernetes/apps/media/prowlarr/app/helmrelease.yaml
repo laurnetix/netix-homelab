@@ -23,7 +23,7 @@ spec:
               # family setup the stable line is the better default, and the
               # UPDATE__BRANCH below is set to match so in-app update prompts
               # don't offer builds this tag will never receive.
-              tag: 2.6.1.5509
+              tag: 2.6.2.5562
             env:
               PROWLARR__APP__INSTANCENAME: Prowlarr
               PROWLARR__APP__THEME: dark
