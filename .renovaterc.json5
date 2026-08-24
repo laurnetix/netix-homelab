@@ -46,6 +46,21 @@
       dependencyDashboardApproval: true,
     },
     {
+      // v4.0.1 was merged 2026-08-23 and broke the app: the Helm upgrade timed
+      // out, the rollback to v3.4.1 also failed, and the release sat wedged
+      // (revisions 14-17 failed) with the pod crashlooping - it authenticates
+      // to the controller and logs "Prometheus is enabled" but never opens its
+      // listener, so the probe kills it. Pinned back to v3.4.1 in
+      // kubernetes/apps/observability/unpoller/app/helmrelease.yaml.
+      // Approval-gated rather than disabled outright so v3.x patch/minor fixes
+      // still flow automatically; v4 stays on the dashboard under "Pending
+      // Approval" until someone confirms it actually serves metrics here.
+      description: "Require manual approval for unpoller major bumps",
+      matchPackageNames: ["ghcr.io/unpoller/unpoller"],
+      matchUpdateTypes: ["major"],
+      dependencyDashboardApproval: true,
+    },
+    {
       description: "Override Helmfile Dependency Name",
       matchDatasources: ["docker"],
       matchManagers: ["helmfile"],

@@ -18,7 +18,15 @@ spec:
           app:
             image:
               repository: ghcr.io/unpoller/unpoller
-              tag: v4.0.1
+              # Pinned back from v4.0.1 (2026-08-24). That major bump failed to
+              # roll out and the Helm rollback failed too, leaving the release
+              # wedged (revisions 14-17 failed, last good is 4) and the pod
+              # crashlooping: it authenticates to the controller and logs
+              # "Prometheus is enabled" but never opens its listener, so the
+              # probe kills it. Not a port-permission or probe-timing issue -
+              # both were tested and ruled out. Re-pin only after confirming
+              # v4 actually serves metrics here.
+              tag: v3.4.1
             env:
               TZ: America/New_York
               # Prometheus-only: unpoller ships an InfluxDB output that is on
