@@ -26,7 +26,7 @@ spec:
               # these as prereleases on GitHub, but this is the branch the
               # home-ops ecosystem runs universally. Revisit if a stable tag
               # ever appears.
-              tag: 4.0.19.3001
+              tag: 4.0.19.3009
             env:
               SONARR__APP__INSTANCENAME: Sonarr
               SONARR__APP__THEME: dark
