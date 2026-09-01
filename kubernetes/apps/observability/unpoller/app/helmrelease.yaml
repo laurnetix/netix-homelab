@@ -26,7 +26,7 @@ spec:
               # probe kills it. Not a port-permission or probe-timing issue -
               # both were tested and ruled out. Re-pin only after confirming
               # v4 actually serves metrics here.
-              tag: v3.5.0
+              tag: v5.2.2
             env:
               TZ: America/New_York
               # Prometheus-only: unpoller ships an InfluxDB output that is on
