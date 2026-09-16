@@ -1,4 +1,8 @@
-# renovate: datasource=docker depName=ghcr.io/siderolabs/installer
-talosVersion: v1.13.9
+# Tracked via github-releases, not ghcr.io/siderolabs/installer: that image
+# stopped publishing after 1.13.x (v1.14.x returns 404) now that Talos uses
+# Image Factory, so the old datasource silently pinned Talos while kubelet kept
+# advancing. See kubernetes/apps/system-upgrade/tuppr/upgrades/talos.yaml.
+# renovate: datasource=github-releases depName=siderolabs/talos
+talosVersion: v1.14.1
 # renovate: datasource=docker depName=ghcr.io/siderolabs/kubelet
 kubernetesVersion: v1.37.0

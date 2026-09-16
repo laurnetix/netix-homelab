@@ -38,8 +38,21 @@
       // on our terms: Renovate still surfaces new versions under "Pending
       // Approval" on the dashboard, but opens no PR until the box is ticked.
       // Also covers the (inert) talos/talenv.yaml, keeping all three in step.
+      //
+      // ORDER MATTERS: Talos must lead Kubernetes. Talos 1.13 caps at k8s 1.36,
+      // so approving a kubelet bump without the matching Talos bump makes the
+      // KubernetesUpgrade job fail permanently (happened 2026-09-01: k8s v1.37.0
+      // approved while Talos sat at v1.13.9). Approve Talos first, let it roll
+      // all 3 nodes, then approve kubelet.
+      //
+      // `siderolabs/talos` (github-releases) replaced
+      // `ghcr.io/siderolabs/installer` (docker) as the Talos datasource: that
+      // image stopped publishing after 1.13.x, so Renovate silently stopped
+      // seeing Talos releases while kubelet kept advancing. The old name is kept
+      // in the match list so any lingering reference stays gated too.
       description: "Require manual approval for Talos & Kubernetes version bumps",
       matchPackageNames: [
+        "siderolabs/talos",
         "ghcr.io/siderolabs/installer",
         "ghcr.io/siderolabs/kubelet",
       ],

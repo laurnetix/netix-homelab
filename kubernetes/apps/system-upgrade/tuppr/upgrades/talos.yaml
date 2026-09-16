@@ -1,18 +1,31 @@
 ---
 # Talos upgrades cannot skip minor versions - only adjacent-minor migrations
-# are tested (docs.siderolabs.com/talos/v1.13/.../upgrading-talos). Ladder:
-# v1.11.3 -> v1.12.10 -> v1.13.6. Rung 1 (v1.12.10) completed successfully on
-# all 3 nodes 2026-07-20 in ~20 minutes total, fully sequential, zero failures.
-# This bumps to rung 2 (v1.13.6), the final target. tuppr does NOT enforce the
-# ladder itself - it upgrades directly to whatever version is set here.
+# are tested (docs.siderolabs.com/talos/v1.13/.../upgrading-talos). tuppr does
+# NOT enforce the ladder itself - it upgrades directly to whatever is set here,
+# so this must only ever move one minor at a time. v1.13.9 -> v1.14.1 is
+# adjacent, so it is a single valid rung.
+#
+# Why v1.14 now: Kubernetes v1.37.0 is NOT supported on Talos 1.13 (1.13 caps
+# at k8s 1.36). The kubelet bump to v1.37.0 landed without this one, so the
+# KubernetesUpgrade job failed permanently on 2026-09-01. Talos must lead.
+#
+# Datasource note: this deliberately does NOT track ghcr.io/siderolabs/installer
+# any more. Talos stopped publishing that image after 1.13.x (verified: v1.13.10
+# returns HTTP 200, v1.14.0 and v1.14.1 both 404) in favour of Image Factory, so
+# Renovate could no longer see new Talos releases through it while the kubelet
+# datasource kept advancing - which is exactly how the skew above happened, and
+# would have kept happening. github-releases tracks 1.14+ correctly. The actual
+# OS image already comes from Image Factory via talos/talconfig.yaml
+# (talosImageURL: factory.talos.dev/installer/<schematic>), which builds any
+# version on demand, so nothing else needs to change.
 apiVersion: tuppr.home-operations.com/v1alpha1
 kind: TalosUpgrade
 metadata:
   name: talos
 spec:
   talos:
-    # renovate: datasource=docker depName=ghcr.io/siderolabs/installer
-    version: v1.13.9
+    # renovate: datasource=github-releases depName=siderolabs/talos
+    version: v1.14.1
   # All 3 nodes are control-plane (no dedicated workers), so no nodeSelector -
   # every node is in scope. Talos itself additionally enforces one-CP-node-at-
   # a-time via etcd quorum checks, independent of tuppr.
