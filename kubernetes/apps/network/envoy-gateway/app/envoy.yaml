@@ -45,12 +45,22 @@ kind: Gateway
 metadata:
   name: envoy-external
   annotations:
-    external-dns.alpha.kubernetes.io/target: external.${SECRET_DOMAIN}
+    # external-dns v0.22.0 (chart 1.22.0) changed the default annotation prefix
+    # to external-dns.kubernetes.io/ with NO fallback to the .alpha. prefix
+    # (confirmed from the running binary: --annotation-prefix defaults to
+    # "external-dns.kubernetes.io/"). With the old prefix the target below went
+    # unread, so external-dns fell back to this Gateway's LB IP and tried to
+    # publish proxied A records to 192.168.0.250 - which Cloudflare rejects
+    # (error 9003, "not allowed for a proxied record"). Because policy: sync, it
+    # first DELETED the correct CNAMEs, taking all external hostnames down on
+    # 2026-09-16. This target is load-bearing: it is what makes every external
+    # record a CNAME to the tunnel instead of an A record to a private IP.
+    external-dns.kubernetes.io/target: external.${SECRET_DOMAIN}
 spec:
   gatewayClassName: envoy
   infrastructure:
     annotations:
-      external-dns.alpha.kubernetes.io/hostname: external.${SECRET_DOMAIN}
+      external-dns.kubernetes.io/hostname: external.${SECRET_DOMAIN}
       lbipam.cilium.io/ips: "192.168.0.250"
   listeners:
     - name: http
@@ -75,12 +85,16 @@ kind: Gateway
 metadata:
   name: envoy-internal
   annotations:
-    external-dns.alpha.kubernetes.io/target: internal.${SECRET_DOMAIN}
+    # Same prefix migration as envoy-external above. unifi-dns did not error
+    # like Cloudflare did - the UniFi provider happily accepted A records to
+    # 192.168.0.254 - so this one broke silently: internal lookups started
+    # resolving straight to gateway IPs instead of the internal CNAME.
+    external-dns.kubernetes.io/target: internal.${SECRET_DOMAIN}
 spec:
   gatewayClassName: envoy
   infrastructure:
     annotations:
-      external-dns.alpha.kubernetes.io/hostname: internal.${SECRET_DOMAIN}
+      external-dns.kubernetes.io/hostname: internal.${SECRET_DOMAIN}
       lbipam.cilium.io/ips: "192.168.0.254"
   listeners:
     - name: http
@@ -152,7 +166,10 @@ kind: HTTPRoute
 metadata:
   name: https-redirect
   annotations:
-    external-dns.alpha.kubernetes.io/controller: none
+    # Migrated with the Gateway targets above - on the old prefix this opt-out
+    # was silently ignored by v0.22.0, so external-dns would have started
+    # publishing records for the redirect route too.
+    external-dns.kubernetes.io/controller: none
 spec:
   parentRefs:
     - name: envoy-external
