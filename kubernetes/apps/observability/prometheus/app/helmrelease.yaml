@@ -23,6 +23,35 @@ spec:
     # — fire permanently at severity=critical, which can never clear.
     kubeProxy:
       enabled: false
+    # etcd was completely unmonitored until 2026-09-17, which left the most
+    # likely cause of apiserver `leases` 500/504s invisible: etcd logs showed
+    # "apply request took too long" (423ms vs a 100ms expectation) on
+    # /registry/leases reads, with the time spent in "agreement among raft nodes
+    # before linearized reading". Those lease timeouts are what make the Longhorn
+    # CSI sidecars lose leader election and restart, and what keeps
+    # KubeAPIErrorBudgetBurn's 1d/2h and 3d/6h windows lit.
+    #
+    # No TLS or client certs needed here, unlike most etcd scrape setups: this
+    # cluster's Talos config already exposes a plain-HTTP metrics listener via
+    # `cluster.etcd.extraArgs.listen-metrics-urls: http://0.0.0.0:2381`
+    # (talos/patches/), verified returning HTTP 200 from a pod on all three
+    # nodes. NOTE the port is 2381 - Talos v1.14 release notes mention etcd
+    # metrics moving to 2383, but that applies to the default listener, not this
+    # explicit override. Probe the port before trusting the docs.
+    kubeEtcd:
+      enabled: true
+      # Control-plane node IPs; all three are control-plane here.
+      endpoints:
+        - 192.168.0.13
+        - 192.168.0.251
+        - 192.168.0.146
+      service:
+        enabled: true
+        port: 2381
+        targetPort: 2381
+      serviceMonitor:
+        enabled: true
+        scheme: http
     prometheus:
       prometheusSpec:
         # Select all ServiceMonitors/PodMonitors/Probes/PrometheusRules/ScrapeConfigs
