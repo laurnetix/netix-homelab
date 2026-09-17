@@ -76,9 +76,34 @@ endpoints:
     group: external
     interval: 1m
     name: External (echo via tunnel)
-    # echo is published on envoy-external, so a 200 here exercises the whole
-    # public chain end to end, not just the in-cluster gateway.
+    # NOTE: this does NOT prove the public chain works, despite appearances.
+    # gatus runs in-cluster, so it resolves this name through split-horizon DNS
+    # to envoy-external's LAN IP (192.168.0.250) and connects directly - never
+    # touching Cloudflare or the tunnel. Proven on 2026-09-16: every public
+    # hostname was down for 30 minutes (external-dns deleted the CNAMEs) and
+    # this endpoint stayed green throughout. Keep it - it still catches
+    # envoy-external/app failures - but the check below is what watches the
+    # public path.
     url: https://echo.${SECRET_DOMAIN}
+
+  - conditions:
+      - "[DNS_RCODE] == NOERROR"
+    group: external
+    interval: 1m
+    name: Public DNS (jellyfin via Cloudflare)
+    # The gap the echo check above cannot cover. Asks a PUBLIC resolver whether
+    # the record still exists, so it is immune to split-horizon DNS and to
+    # anything cached in-cluster. This is the exact failure that went unnoticed
+    # for 30 minutes on 2026-09-16: external-dns v0.22.0 stopped reading the
+    # Gateway's target annotation, deleted every public CNAME under policy:sync,
+    # and could not recreate them (Cloudflare rejects proxied records pointing
+    # at RFC1918). The records were simply gone - NXDOMAIN here, NOERROR when
+    # healthy. Uses the same dns: endpoint shape as the k8s-gateway check above,
+    # which is already proven working in this cluster.
+    url: "1.1.1.1"
+    dns:
+      query-name: "jellyfin.${SECRET_DOMAIN}"
+      query-type: "A"
 
 metrics: true
 
