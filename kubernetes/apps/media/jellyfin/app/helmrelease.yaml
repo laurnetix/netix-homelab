@@ -25,10 +25,19 @@ spec:
           # after a restore. Idempotent, and a no-op before first run.
           enable-metrics:
             # Reuses the Jellyfin image so there is no second image for Renovate
-            # to track and nothing extra to pull.
+            # to track and nothing extra to pull. MUST be bumped together with
+            # the app container below - they are the same image in two places
+            # and a mismatch pulls two versions on every start.
             image:
               repository: ghcr.io/jellyfin/jellyfin
-              tag: 10.11.11
+              # Digest-pinned because v12 dropped three-part tags: 12.0.0 does
+              # not exist, and "12"/"12.0"/"12.1" are all MOVING tags (verified
+              # 2026-09-17: "12" and "12.0" resolved to different digests, with
+              # "12" already tracking 12.1). Without the digest a patch could
+              # land silently on any pod restart - unacceptable for an app whose
+              # upgrades rewrite the database irreversibly, and it would bypass
+              # the Renovate approval gate in .renovaterc.json5.
+              tag: 12.1@sha256:008ec8024bdaaa6f0a3f0de468e185633eeba9d67c56936e8dbf5ef6b8d6200f
             command:
               - sh
               - -c
@@ -47,7 +56,8 @@ spec:
           app:
             image:
               repository: ghcr.io/jellyfin/jellyfin
-              tag: 10.11.11
+              # Keep in lockstep with the enable-metrics init container above.
+              tag: 12.1@sha256:008ec8024bdaaa6f0a3f0de468e185633eeba9d67c56936e8dbf5ef6b8d6200f
             env:
               # Advertised to clients for direct connections; without it
               # Jellyfin guesses from the request and can hand out the
@@ -69,6 +79,27 @@ spec:
                   timeoutSeconds: 10
                   failureThreshold: 6
               readiness: *probes
+              # Added for the 10.11 -> 12 migration (2026-09-17). v12 rewrites
+              # the database on FIRST BOOT and the upgrade docs say that takes
+              # "several minutes", but liveness above only tolerates
+              # 30s + (6 x 30s) = 3m30s before the kubelet kills the container.
+              # Being killed part-way through an irreversible schema rewrite is
+              # the worst failure available here, and there is no downgrade.
+              # A startup probe suspends liveness/readiness until it passes, so
+              # this buys 10 minutes (30 x 20s) for the migration WITHOUT
+              # permanently weakening liveness afterwards. Same shape qbittorrent
+              # already uses on this chart version for its slow recheck.
+              startup:
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /health
+                    port: *httpPort
+                  initialDelaySeconds: 15
+                  periodSeconds: 20
+                  timeoutSeconds: 10
+                  failureThreshold: 30
             securityContext:
               allowPrivilegeEscalation: false
               capabilities: { drop: ["ALL"] }
