@@ -74,6 +74,22 @@
       dependencyDashboardApproval: true,
     },
     {
+      // Jellyfin 12 (there is no 11) rewrites its database on FIRST BOOT and
+      // there is no downgrade path - a backup is the only way back. Rolling
+      // back the image after it has booted does not undo the schema change.
+      // Unlike every other app here, an unattended weekend merge of this one is
+      // not recoverable by reverting a commit, so it must never auto-merge.
+      // Pre-flight before approving: resolve case-duplicate usernames (v12 makes
+      // them case-insensitive and migration FAILS on a collision), remove the
+      // versioned plugin directory (10.x-targeted plugins can boot-loop v12),
+      // take a fresh snapshot, and bump BOTH tags in the HelmRelease - the app
+      // container and the enable-metrics init container.
+      description: "Require manual approval for Jellyfin major bumps (v12 = irreversible DB rewrite)",
+      matchPackageNames: ["ghcr.io/jellyfin/jellyfin"],
+      matchUpdateTypes: ["major"],
+      dependencyDashboardApproval: true,
+    },
+    {
       description: "Override Helmfile Dependency Name",
       matchDatasources: ["docker"],
       matchManagers: ["helmfile"],
