@@ -1,7 +1,19 @@
 ---
-# SABnzbd exposes no Prometheus endpoint; exportarr is the ecosystem answer and
-# is worth adding alongside the *arr exporters. Until then these are built on
-# kube-state-metrics and VolSync, matching qbittorrent.
+# Two groups, because the alerts come from two very different places.
+#
+# sabnzbd.rules is the original set: kube-state-metrics, kubelet volume stats
+# and VolSync. Those work whether or not SABnzbd itself is healthy, so they stay
+# the floor - if the exporter sidecar breaks, these still fire.
+#
+# sabnzbd.exportarr.rules is everything the exportarr sidecar made possible (see
+# the `metrics` container in helmrelease.yaml). Usenet failures are almost
+# always quiet ones - a lapsed block account, a news server refusing auth, a
+# queue paused and forgotten - so this is where they stop being invisible.
+#
+# Deliberately NOT adding a free-space alert for /data here: media-nfs's
+# PrometheusRule already watches the share through kubelet volume stats, which
+# keeps working even when SABnzbd does not. sabnzbd_disk_* is used below only to
+# check WHICH filesystem the folders point at, which kubelet cannot see.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -48,5 +60,137 @@ spec:
               ({{ $value | printf "%.1f" }}%) - check that Folders >
               Temporary/Completed Download Folder point at /data/usenet/*, not
               the /config default
+          labels:
+            severity: warning
+
+    - name: sabnzbd.exportarr.rules
+      rules:
+        # Selecting on service+endpoint rather than job: those two labels are
+        # attached by the Prometheus Operator from the ServiceMonitor itself,
+        # whereas `job` comes from whatever jobLabel resolves to and would go
+        # stale if that ever changed.
+        #
+        # exportarr answers /metrics with a 500 as soon as a collector errors,
+        # so this covers a wrong API key, a SABnzbd API that has stopped
+        # answering, and a crashed sidecar. It also covers the hostname
+        # verification failure described in helmrelease.yaml, which returns 403
+        # and looks like nothing else. The second clause keeps it quiet when the
+        # whole pod is gone - SabnzbdDown already says that.
+        - alert: SabnzbdMetricsScrapeFailing
+          expr: |-
+            up{namespace="media", service="sabnzbd", endpoint="metrics"} == 0
+              and on()
+            kube_deployment_status_replicas_available{namespace="media", deployment="sabnzbd"} > 0
+          for: 20m
+          annotations:
+            summary: >-
+              SABnzbd is running but its exportarr sidecar has failed every
+              scrape for 20m - check the API key in the sabnzbd-secret
+              ExternalSecret and the sidecar logs
+          labels:
+            severity: warning
+
+        # The classic dead Usenet account: items sit in the queue, the WebUI
+        # looks alive, and nothing downloads. Note SABnzbd's queue holds only
+        # items still being fetched - verification, repair and unpack happen in
+        # the history - so a zero speed here really is zero progress.
+        #
+        # The paused clause matters: SABnzbd drops to 0 B/s legitimately when
+        # the queue is paused, including the "pause while post-processing"
+        # option, and that is not a fault. 2h rather than 1h because an article
+        # propagation delay on a fresh NZB can idle the queue for a while.
+        - alert: SabnzbdQueueStalled
+          expr: |-
+            sabnzbd_queue_length > 0
+              and
+            sabnzbd_speed_bps == 0
+              and
+            sabnzbd_paused == 0
+          for: 2h
+          annotations:
+            summary: >-
+              SABnzbd has {{ $value | printf "%.0f" }} items queued but has
+              downloaded nothing for 2h - check the news server credentials in
+              Config > Servers
+          labels:
+            severity: warning
+
+        # A queue paused by hand and then forgotten looks identical to a working
+        # one until someone notices nothing new has appeared for a week.
+        - alert: SabnzbdQueuePaused
+          expr: |-
+            sabnzbd_paused == 1
+              and
+            sabnzbd_queue_length > 0
+          for: 6h
+          annotations:
+            summary: >-
+              SABnzbd has been paused for 6h with items still in the queue
+          labels:
+            severity: warning
+
+        # Articles that cannot be fetched are how a dying block account, a
+        # retention shortfall or a takedown actually present themselves: nothing
+        # errors, downloads just quietly fail par2 repair.
+        #
+        # increase() rather than delta(): these counters are accumulated in the
+        # exporter's own memory and restart from zero with the sidecar, which is
+        # exactly the counter-reset shape increase() handles. The second clause
+        # is the guard - on a quiet night a handful of attempted articles could
+        # otherwise produce a 100% failure rate.
+        - alert: SabnzbdArticleFailureRateHigh
+          expr: |-
+            (
+              1 - (
+                increase(sabnzbd_server_articles_success[6h])
+                  /
+                increase(sabnzbd_server_articles_total[6h])
+              )
+            ) > 0.2
+              and
+            increase(sabnzbd_server_articles_total[6h]) > 1000
+          for: 1h
+          annotations:
+            summary: >-
+              {{ $value | humanizePercentage }} of articles requested from
+              Usenet server {{ $labels.server }} have failed in the last 6h -
+              check the block account's balance and retention
+          labels:
+            severity: warning
+
+        # SABnzbd's own warning counter. It covers unpack and par2 failures,
+        # disk-full events and server connection errors - the things that make
+        # a download "complete" without producing a usable file.
+        - alert: SabnzbdHasWarnings
+          expr: |-
+            sabnzbd_queue_warnings > 0
+          for: 1h
+          annotations:
+            summary: >-
+              SABnzbd is reporting {{ $value | printf "%.0f" }} warnings -
+              check Status > Warnings (unpack/par2 failures and server errors
+              land here)
+          labels:
+            severity: warning
+
+        # The direct version of the concern SabnzbdConfigVolumeFillingUp above
+        # can only infer after the damage is done. These two series report the
+        # size of the filesystem SABnzbd's Temporary and Completed folders
+        # actually live on, so a folder left at its /config default shows up as
+        # the 5Gi Longhorn volume rather than the NAS share - immediately, and
+        # before a single byte has been downloaded into the wrong place.
+        #
+        # 100 GiB is chosen to be unmistakable: the config PVC is 5Gi and the
+        # Synology share holds a ~1.1 TB library, so nothing legitimate sits
+        # anywhere near this line.
+        - alert: SabnzbdFolderNotOnNAS
+          expr: |-
+            sabnzbd_disk_total_bytes < (100 * 1024 * 1024 * 1024)
+          for: 30m
+          annotations:
+            summary: >-
+              SABnzbd's {{ $labels.folder }} folder is on a filesystem of only
+              {{ $value | humanize1024 }}B - it is almost certainly still at the
+              /config default instead of /data/usenet/*
           labels:
             severity: warning

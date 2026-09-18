@@ -1,7 +1,14 @@
 ---
-# Sonarr exposes no Prometheus endpoint; exportarr is the ecosystem answer and
-# is worth adding once the whole stack is up. Until then these are built on
-# kube-state-metrics and VolSync.
+# Two groups, because the alerts come from two very different places.
+#
+# sonarr.rules is the original set: kube-state-metrics, kubelet volume stats and
+# VolSync. Those work whether or not Sonarr itself is healthy, so they stay the
+# floor - if the exporter sidecar breaks, these still fire.
+#
+# sonarr.exportarr.rules is everything the exportarr sidecar made possible (see
+# the `metrics` container in helmrelease.yaml). These series only exist while
+# that container can reach Sonarr's API, which is exactly why
+# SonarrMetricsScrapeFailing below exists to watch the watcher.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -41,5 +48,104 @@ spec:
             summary: >-
               Sonarr config volume is over 85% full
               ({{ $value | printf "%.1f" }}%)
+          labels:
+            severity: warning
+
+    - name: sonarr.exportarr.rules
+      rules:
+        # Selecting on service+endpoint rather than job: those two labels are
+        # attached by the Prometheus Operator from the ServiceMonitor itself,
+        # whereas `job` comes from whatever jobLabel resolves to and would go
+        # stale if that ever changed.
+        #
+        # exportarr answers /metrics with a 500 as soon as ANY of its collectors
+        # errors, so this single alert covers a wrong API key, a Sonarr API that
+        # has stopped answering, and a crashed sidecar. The second clause keeps
+        # it quiet when the whole pod is simply gone - SonarrDown already says
+        # that, and saying it twice just doubles the Telegram traffic.
+        - alert: SonarrMetricsScrapeFailing
+          expr: |-
+            up{namespace="media", service="sonarr", endpoint="metrics"} == 0
+              and on()
+            kube_deployment_status_replicas_available{namespace="media", deployment="sonarr"} > 0
+          for: 20m
+          annotations:
+            summary: >-
+              Sonarr is running but its exportarr sidecar has failed every
+              scrape for 20m - check the API key in the sonarr-secret
+              ExternalSecret and the sidecar logs
+          labels:
+            severity: warning
+
+        # Sonarr's own health checks, surfaced verbatim. Indexer and download
+        # client checks are carved out into their own alerts below, so this one
+        # covers the rest: root folder missing, import mechanism misconfigured,
+        # update failures and so on.
+        - alert: SonarrHealthError
+          expr: |-
+            sonarr_system_health_issues{type="error", source!~"Indexer.*|DownloadClient.*"} == 1
+          for: 15m
+          annotations:
+            summary: >-
+              Sonarr health check {{ $labels.source }} is in error:
+              {{ $labels.message }}
+          labels:
+            severity: warning
+
+        # Sonarr disables an indexer after repeated failures and raises this as
+        # a warning-level check. Nothing breaks immediately - existing grabs
+        # continue - but new searches quietly return fewer results, which is the
+        # kind of thing that goes unnoticed for weeks. An hour of patience
+        # before alerting, since a tracker being briefly unreachable is normal.
+        - alert: SonarrIndexersUnavailable
+          expr: |-
+            sonarr_system_health_issues{source=~"Indexer.*"} == 1
+          for: 1h
+          annotations:
+            summary: >-
+              Sonarr has an indexer problem ({{ $labels.source }}):
+              {{ $labels.message }}
+          labels:
+            severity: warning
+
+        # The download client checks cover "SABnzbd/qBittorrent is unreachable"
+        # and "the download client's completed folder is not where Sonarr
+        # expects". Either one stops imports dead while downloads keep piling
+        # up, so this gets a shorter fuse than the indexer check.
+        - alert: SonarrDownloadClientUnavailable
+          expr: |-
+            sonarr_system_health_issues{source=~"DownloadClient.*"} == 1
+          for: 30m
+          annotations:
+            summary: >-
+              Sonarr cannot use a download client ({{ $labels.source }}):
+              {{ $labels.message }}
+          labels:
+            severity: warning
+
+        # "Queue has items but nothing has finished" - the signature of a stuck
+        # import (permissions, a missing root folder, a download the client
+        # cannot hand over). sonarr_history_total counts everything Sonarr has
+        # ever recorded as grabbed/imported/failed, so a flat history with a
+        # non-empty queue means no progress at all, not merely slow progress.
+        #
+        # Both sides are wrapped in sum() on purpose. In exportarr v2.3.0
+        # sonarr_queue_total is emitted as a single series whose value is the
+        # queue length but whose status/download_status/download_state labels
+        # come from whichever record happened to be last - so the label set
+        # changes underneath you and only the aggregate is trustworthy. (Fixed
+        # upstream after v2.3.0; revisit these expressions when v3 lands.)
+        # The metric is absent entirely when the queue is empty, which is what
+        # makes `> 0` the right test for "there is work outstanding".
+        - alert: SonarrQueueStalled
+          expr: |-
+            sum(sonarr_queue_total) > 0
+              and
+            sum(delta(sonarr_history_total[6h])) == 0
+          for: 2h
+          annotations:
+            summary: >-
+              Sonarr has {{ $value | printf "%.0f" }} items queued but has
+              imported nothing in 6h - check Activity > Queue for a stuck item
           labels:
             severity: warning

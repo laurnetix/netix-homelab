@@ -88,6 +88,69 @@ spec:
                 # makes every download slower. The 100m request is what the
                 # scheduler sees; the burst is free when nodes are idle.
                 memory: 4Gi
+          # exportarr: SABnzbd speaks no Prometheus, so this sidecar polls its
+          # API and translates the answers into metrics. Same exporter as the
+          # *arr apps - it grew a `sabnzbd` subcommand - which is why there is
+          # one image and one convention across the whole namespace rather than
+          # a different exporter per app.
+          metrics:
+            image:
+              repository: ghcr.io/onedr0p/exportarr
+              # v2.3.0 is the newest tagged release (Aug 2025). main has since
+              # been renamed and is mid-rewrite for a v3 that has not shipped,
+              # so do NOT chase `latest` here - the two are far apart and the
+              # metric names below are the v2 ones.
+              tag: v2.3.0
+            args: ["sabnzbd"]
+            env:
+              # 9707 is also the image's built-in default; set explicitly so the
+              # Service port and ServiceMonitor below have something to anchor to.
+              PORT: &metricsPort 9707
+              # Loopback, so this never leaves the pod - and deliberately the
+              # literal name "localhost", which SABnzbd's hostname verification
+              # exempts by name (alongside bare IPv4/IPv6 literals) before it
+              # ever consults SABNZBD__HOST_WHITELIST_ENTRIES above. That is why
+              # the whitelist needs no new entry for the exporter. Port is *port
+              # (8080) above; YAML aliases cannot be interpolated into a string,
+              # so it is spelled out - keep the two in step.
+              URL: http://localhost:8080
+              # NOT the whole sabnzbd-secret via envFrom: exportarr parses EVERY
+              # environment variable as config (koanf lowercases names and maps
+              # `__` to a path separator), so handing it unrelated keys is asking
+              # for a surprise. One key, mapped to the one name it wants.
+              API_KEY:
+                valueFrom:
+                  secretKeyRef:
+                    name: "{{ .Release.Name }}-secret"
+                    key: SABNZBD__API_KEY
+              TZ: America/New_York
+            probes:
+              # /healthz answers 200 without touching SABnzbd, so it reports
+              # "exporter process alive", not "SABnzbd healthy" - which is what
+              # a probe should do. Whether SABnzbd is actually reachable shows
+              # up as a failed scrape instead.
+              liveness: &metricsProbes
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /healthz
+                    port: *metricsPort
+                  initialDelaySeconds: 10
+                  periodSeconds: 30
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+              readiness: *metricsProbes
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: { drop: ["ALL"] }
+            resources:
+              requests:
+                cpu: 10m
+                memory: 32Mi
+              limits:
+                memory: 128Mi
     defaultPodOptions:
       securityContext:
         runAsNonRoot: true
@@ -95,23 +158,34 @@ spec:
         runAsGroup: 1000
         fsGroup: 1000
         fsGroupChangePolicy: OnRootMismatch
+    # advancedMounts rather than globalMounts throughout: globalMounts attaches a
+    # volume to EVERY container in the controller, which since the exportarr
+    # sidecar landed would hand it /config and - worse - the media NFS share it
+    # has no business touching. The exporter talks HTTP and nothing else.
+    # The `app` entries below are byte-for-byte what globalMounts produced.
     persistence:
       config:
         existingClaim: sabnzbd
-        globalMounts:
-          - path: /config
+        advancedMounts:
+          sabnzbd:
+            app:
+              - path: /config
       # Keeps SABnzbd's verbose logging out of the hourly VolSync snapshot.
       # Safe here (unlike qBittorrent, where the log path is nested one level
       # deeper and kubelet ends up creating a root-owned parent directory):
       # /config already exists as the PVC mount, so fsGroup applies cleanly.
       logs:
         type: emptyDir
-        globalMounts:
-          - path: /config/logs
+        advancedMounts:
+          sabnzbd:
+            app:
+              - path: /config/logs
       tmp:
         type: emptyDir
-        globalMounts:
-          - path: /tmp
+        advancedMounts:
+          sabnzbd:
+            app:
+              - path: /tmp
       # CRITICAL: /data, the SAME path as Sonarr, Radarr and qBittorrent.
       # SABnzbd unpacks into /data/usenet/incomplete and drops finished files in
       # /data/usenet/complete; the *arr apps then import from there into
@@ -131,13 +205,38 @@ spec:
       media:
         type: persistentVolumeClaim
         existingClaim: media-nfs
-        globalMounts:
-          - path: /data
+        advancedMounts:
+          sabnzbd:
+            app:
+              - path: /data
     service:
       app:
         ports:
           http:
             port: *port
+          # Second port on the SAME Service rather than a service of its own -
+          # the HTTPRoute below pins its backendRef to *port, so nothing routes
+          # user traffic here. It exists for the ServiceMonitor to select.
+          metrics:
+            port: *metricsPort
+    serviceMonitor:
+      app:
+        # This chart auto-detects the Service only when exactly one exists,
+        # which is the case here - but say it explicitly anyway, because adding
+        # a second Service later would turn that into a hard template failure
+        # rather than a silent change. qBittorrent is already in that position
+        # thanks to its bittorrent LoadBalancer.
+        service:
+          identifier: app
+        endpoints:
+          - port: metrics
+            scheme: http
+            path: /metrics
+            # Download speed and queue size are the fastest-moving numbers in
+            # this namespace, so this is the one exporter where a 1m interval is
+            # about resolution rather than politeness.
+            interval: 1m
+            scrapeTimeout: 30s
     route:
       app:
         hostnames: ["sabnzbd.${SECRET_DOMAIN}"]

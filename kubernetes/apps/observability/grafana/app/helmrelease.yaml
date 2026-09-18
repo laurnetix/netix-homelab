@@ -103,6 +103,54 @@ spec:
             - name: DS_EXPRESSION
               value: __expr__
 
+        # Media stack. These three went live with the metrics sidecars added to
+        # media/{sonarr,radarr,qbittorrent} - before those, none of these apps
+        # exported anything at all.
+        #
+        # Nothing here for Prowlarr or SABnzbd, and not by oversight:
+        #   * grafana.com has no Prowlarr dashboard of any kind. The prowlarr_*
+        #     series are there and queryable; they just have no published home,
+        #     and a hand-built one belongs in the Grafana UI (it persists to the
+        #     PVC) rather than pasted as JSON into this file.
+        #   * the two SABnzbd dashboards that exist (12524 and 9567) are written
+        #     against msroest/sabnzbd_exporter - sabnzbd_queue_size,
+        #     sabnzbd_download_bytes and friends. exportarr names the same ideas
+        #     differently (sabnzbd_queue_length, sabnzbd_downloaded_bytes), so
+        #     both would render entirely empty. Adding a dashboard that shows
+        #     nothing is worse than admitting there isn't one.
+        sonarr:
+          gnetId: 12530
+          revision: 2
+          # Bare-string "datasource": "${DS_PROMETHEUS}" form, which the chart's
+          # line-based sed rewrites fine - so the simple string form (the
+          # datasource NAME), like the unpoller dashboards above.
+          datasource: Prometheus
+        radarr:
+          gnetId: 12896
+          revision: 1
+          # Also the bare-string form, so the simple form works - note this one
+          # names its input DS_RANCHER_MONITORING rather than DS_PROMETHEUS,
+          # which is irrelevant here precisely because the string form rewrites
+          # the value regardless of the variable's name. It would matter if this
+          # ever needed the list workaround.
+          #
+          # Upstream typo to be aware of: the queue panel queries
+          # `radrr_queue_total` (sic) and will always read zero. Everything else
+          # is correct.
+          datasource: Prometheus
+        qbittorrent:
+          gnetId: 23784
+          revision: 1
+          # Object datasource form ("uid": "${DS_PROMETHEUS}") throughout, so
+          # this needs the list workaround and the value is the datasource UID.
+          # Chosen over the older 15116/23341: it is the one written against
+          # martabal/qbittorrent-exporter, which is what the sidecar runs, and
+          # it stays within the metrics that exporter emits by default - no
+          # qbittorrent_torrent_info, so ENABLE_HIGH_CARDINALITY can stay off.
+          datasource:
+            - name: DS_PROMETHEUS
+              value: prometheus
+
     datasources:
       datasources.yaml:
         apiVersion: 1

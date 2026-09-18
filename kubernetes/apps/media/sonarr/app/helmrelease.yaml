@@ -65,6 +65,74 @@ spec:
                 memory: 256Mi
               limits:
                 memory: 2Gi
+          # exportarr: Sonarr speaks no Prometheus, so this sidecar polls its
+          # REST API and translates the answers into metrics. A sidecar rather
+          # than its own Deployment because it then reaches Sonarr over the pod
+          # loopback - no Service hop, and no second place to keep the API key
+          # in sync.
+          metrics:
+            image:
+              repository: ghcr.io/onedr0p/exportarr
+              # v2.3.0 is the newest tagged release (Aug 2025). main has since
+              # been renamed and is mid-rewrite for a v3 that has not shipped,
+              # so do NOT chase `latest` here - the two are far apart and the
+              # metric names below are the v2 ones.
+              tag: v2.3.0
+            # The app to poll is a subcommand, not a flag. One exporter process
+            # serves exactly one *arr.
+            args: ["sonarr"]
+            env:
+              # 9707 is also the image's built-in default; set explicitly so the
+              # Service port and ServiceMonitor below have something to anchor to.
+              PORT: &metricsPort 9707
+              # Loopback, so this never leaves the pod. Port is *port (8989)
+              # above - YAML aliases cannot be interpolated into a string, so it
+              # is spelled out; keep the two in step.
+              URL: http://localhost:8989
+              # NOT the whole sonarr-secret via envFrom: exportarr parses EVERY
+              # environment variable as config (koanf lowercases names and maps
+              # `__` to a path separator), so handing it unrelated keys is asking
+              # for a surprise. One key, mapped to the one name it wants.
+              API_KEY:
+                valueFrom:
+                  secretKeyRef:
+                    name: "{{ .Release.Name }}-secret"
+                    key: SONARR__AUTH__APIKEY
+              # Deliberately NOT setting ENABLE_ADDITIONAL_METRICS. That flag
+              # makes the collector fetch /episodefile and /episode once PER
+              # SERIES - an N+1 against Sonarr's API on every single scrape.
+              # With it off the scrape is three calls total. The cost is that
+              # sonarr_episode_{monitored,unmonitored,quality}_total stay at 0,
+              # which leaves the "Episodes by quality" panel of dashboard 12530
+              # empty. Worth it on a library this size.
+              TZ: America/New_York
+            probes:
+              # /healthz answers 200 without touching Sonarr, so it reports
+              # "exporter process alive", not "Sonarr healthy" - which is what a
+              # probe should do. Whether Sonarr is actually reachable shows up
+              # as sonarr_system_status / a failed scrape instead.
+              liveness: &metricsProbes
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /healthz
+                    port: *metricsPort
+                  initialDelaySeconds: 10
+                  periodSeconds: 30
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+              readiness: *metricsProbes
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: { drop: ["ALL"] }
+            resources:
+              requests:
+                cpu: 10m
+                memory: 32Mi
+              limits:
+                memory: 128Mi
     defaultPodOptions:
       securityContext:
         runAsNonRoot: true
@@ -72,19 +140,30 @@ spec:
         runAsGroup: 1000
         fsGroup: 1000
         fsGroupChangePolicy: OnRootMismatch
+    # advancedMounts rather than globalMounts throughout: globalMounts attaches a
+    # volume to EVERY container in the controller, which since the exportarr
+    # sidecar landed would hand it /config and - worse - the media NFS share it
+    # has no business touching. The exporter talks HTTP and nothing else.
+    # The `app` entries below are byte-for-byte what globalMounts produced.
     persistence:
       config:
         existingClaim: sonarr
-        globalMounts:
-          - path: /config
+        advancedMounts:
+          sonarr:
+            app:
+              - path: /config
       logs:
         type: emptyDir
-        globalMounts:
-          - path: /config/logs
+        advancedMounts:
+          sonarr:
+            app:
+              - path: /config/logs
       tmp:
         type: emptyDir
-        globalMounts:
-          - path: /tmp
+        advancedMounts:
+          sonarr:
+            app:
+              - path: /tmp
       # CRITICAL: mounted at /data, the SAME path as every other media pod.
       # Downloads and the library must appear on one filesystem at one path or
       # imports silently fall back to copying instead of hardlinking - doubling
@@ -93,13 +172,39 @@ spec:
       media:
         type: persistentVolumeClaim
         existingClaim: media-nfs
-        globalMounts:
-          - path: /data
+        advancedMounts:
+          sonarr:
+            app:
+              - path: /data
     service:
       app:
         ports:
           http:
             port: *port
+          # Second port on the SAME Service rather than a service of its own -
+          # the HTTPRoute below pins its backendRef to *port, so nothing routes
+          # user traffic here. It exists for the ServiceMonitor to select.
+          metrics:
+            port: *metricsPort
+    serviceMonitor:
+      app:
+        # This chart auto-detects the Service only when exactly one exists,
+        # which is the case here - but say it explicitly anyway, because adding
+        # a second Service later would turn that into a hard template failure
+        # rather than a silent change. qBittorrent is already in that position
+        # thanks to its bittorrent LoadBalancer.
+        service:
+          identifier: app
+        endpoints:
+          - port: metrics
+            scheme: http
+            path: /metrics
+            # 1m is plenty - none of these numbers move faster than the *arr
+            # refresh cycles behind them, and every scrape is real API load on
+            # Sonarr. The timeout is generous because a scrape walks the whole
+            # series list plus wanted/missing and wanted/cutoff.
+            interval: 1m
+            scrapeTimeout: 30s
     route:
       app:
         hostnames: ["sonarr.${SECRET_DOMAIN}"]

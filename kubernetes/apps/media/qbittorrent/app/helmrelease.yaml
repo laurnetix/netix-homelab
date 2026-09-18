@@ -62,6 +62,94 @@ spec:
                 # Grows with active torrent count and disk cache. Generous for a
                 # family library without letting it starve the node.
                 memory: 4Gi
+          # Metrics sidecar. qBittorrent is the one app here that exportarr
+          # cannot serve - it only speaks the *arr and SABnzbd APIs - so this is
+          # a different exporter, chosen for two reasons:
+          #
+          #   * it is the only qBittorrent exporter under active development
+          #     (esanchezm/prometheus-qbittorrent-exporter and
+          #     caseyscarborough/qbittorrent-exporter both still work, but the
+          #     first released once in 2026 and the second last shipped in 2021), and
+          #   * its metric names are the ones every published qBittorrent
+          #     Grafana dashboard is written against, including 23784 which is
+          #     wired up in observability/grafana. esanchezm exports a different,
+          #     much smaller set (qbittorrent_up, qbittorrent_torrents_count)
+          #     that no community dashboard reads, so picking it would have
+          #     meant hand-building every panel.
+          #
+          # Unlike the exportarr sidecars this one needs a real login - see
+          # externalsecret.yaml for why there is no credential-free path.
+          metrics:
+            image:
+              repository: ghcr.io/martabal/qbittorrent-exporter
+              tag: v2.0.3
+            env:
+              # Its own default is 8090, which collides with nothing here but is
+              # also the default for QBITTORRENT_BASE_URL - set both explicitly
+              # so neither silently points at the other. 9707 matches the
+              # exportarr sidecars so every ServiceMonitor in this namespace
+              # looks the same.
+              EXPORTER_PORT: &metricsPort 9707
+              # Loopback: the WebUI is in this pod. Port is *port (8080) above -
+              # YAML aliases cannot be interpolated into a string, so it is
+              # spelled out; keep the two in step.
+              QBITTORRENT_BASE_URL: http://localhost:8080
+              # Leaving ENABLE_HIGH_CARDINALITY and
+              # ENABLE_INCREASED_CARDINALITY at their default false. Note this
+              # does NOT make the exporter low-cardinality: roughly eighteen
+              # per-torrent gauges are emitted unconditionally, keyed by torrent
+              # name. For a few hundred torrents that is a few thousand series,
+              # which this Prometheus can carry - but it is the one thing to
+              # look at first if active series climb after this lands. The flags
+              # above would add save paths, comments and a series per
+              # torrent-state combination on top.
+              ENABLE_TRACKER: "true"
+              TZ: America/New_York
+            # envFrom rather than a per-key valueFrom because only the bulk form
+            # accepts `optional`, and optional is load-bearing here:
+            # qbittorrent-secret does not exist until the 1Password item
+            # described in externalsecret.yaml is created, and a required
+            # reference would leave the POD stuck in CreateContainerConfigError
+            # - taking qBittorrent itself down over a monitoring prerequisite.
+            # With this, a missing secret only breaks the exporter, which then
+            # falls back to its built-in admin/adminadmin, fails to log in, and
+            # says so through qBittorrentMetricsScrapeFailing.
+            #
+            # Pulling in the whole Secret is safe because that ExternalSecret
+            # templates exactly the two keys this exporter reads, under the
+            # names it reads them by.
+            envFrom:
+              - secretRef:
+                  name: "{{ .Release.Name }}-secret"
+                  optional: true
+            probes:
+              # /healthz answers 200 without contacting qBittorrent, so it
+              # reports "exporter process alive" rather than "qBittorrent
+              # healthy" - which is what a probe should do. /metrics returns 503
+              # when the login or the API call fails, so the real health signal
+              # is the scrape itself failing.
+              liveness: &metricsProbes
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /healthz
+                    port: *metricsPort
+                  initialDelaySeconds: 10
+                  periodSeconds: 30
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+              readiness: *metricsProbes
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: { drop: ["ALL"] }
+            resources:
+              requests:
+                cpu: 10m
+                memory: 32Mi
+              limits:
+                memory: 128Mi
     defaultPodOptions:
       securityContext:
         runAsNonRoot: true
@@ -69,11 +157,18 @@ spec:
         runAsGroup: 1000
         fsGroup: 1000
         fsGroupChangePolicy: OnRootMismatch
+    # advancedMounts rather than globalMounts throughout: globalMounts attaches a
+    # volume to EVERY container in the controller, which since the metrics
+    # sidecar landed would hand it the config PVC (holding the WebUI password
+    # hash) and the media NFS share. The exporter talks HTTP and nothing else.
+    # The `app` entries below are byte-for-byte what globalMounts produced.
     persistence:
       config:
         existingClaim: qbittorrent
-        globalMounts:
-          - path: /config
+        advancedMounts:
+          qbittorrent:
+            app:
+              - path: /config
       # NOTE: deliberately NO separate mount for /config/qBittorrent/logs.
       # Mounting there makes kubelet create /config/qBittorrent as the mount
       # point, owned by root - so qBittorrent (UID 1000) cannot write its
@@ -84,8 +179,10 @@ spec:
       # the only cost is a little extra churn in the hourly backup.
       tmp:
         type: emptyDir
-        globalMounts:
-          - path: /tmp
+        advancedMounts:
+          qbittorrent:
+            app:
+              - path: /tmp
       # CRITICAL: /data, the SAME path as Sonarr and Radarr. qBittorrent writes
       # completed downloads to /data/torrents/complete, and the *arr apps then
       # hardlink them into /data/video/*. If the paths differ between these
@@ -94,13 +191,22 @@ spec:
       media:
         type: persistentVolumeClaim
         existingClaim: media-nfs
-        globalMounts:
-          - path: /data
+        advancedMounts:
+          qbittorrent:
+            app:
+              - path: /data
     service:
       app:
         ports:
           http:
             port: *port
+          # Second port on the SAME ClusterIP Service rather than a service of
+          # its own - the HTTPRoute below pins its backendRef to *port, so
+          # nothing routes user traffic here. Deliberately NOT on the
+          # LoadBalancer below: that address is reachable from the router's
+          # port-forward, and the exporter has no authentication of its own.
+          metrics:
+            port: *metricsPort
       # Separate LoadBalancer purely for the BitTorrent listening port, so peers
       # can open connections INBOUND. Without this qBittorrent shows as "not
       # connectable": it can only reach peers that connect out to it, which
@@ -142,6 +248,22 @@ spec:
             enabled: true
             port: *torrentPort
             protocol: UDP
+    serviceMonitor:
+      app:
+        # REQUIRED here, not optional politeness: this chart only auto-detects
+        # the Service when exactly one exists, and the bittorrent LoadBalancer
+        # above makes two. Without this line the render fails outright.
+        service:
+          identifier: app
+        endpoints:
+          - port: metrics
+            scheme: http
+            path: /metrics
+            # Every scrape drives a full torrent-list fetch against the WebUI,
+            # so this is real work rather than reading a counter. 1m keeps
+            # speed and peer graphs readable without making it constant.
+            interval: 1m
+            scrapeTimeout: 30s
     route:
       app:
         hostnames: ["qbittorrent.${SECRET_DOMAIN}"]

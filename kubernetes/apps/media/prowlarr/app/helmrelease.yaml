@@ -64,6 +64,74 @@ spec:
                 memory: 128Mi
               limits:
                 memory: 512Mi
+          # exportarr: Prowlarr speaks no Prometheus, so this sidecar polls its
+          # REST API and translates the answers into metrics. A sidecar rather
+          # than its own Deployment because it then reaches Prowlarr over the
+          # pod loopback - no Service hop, and no second place to keep the API
+          # key in sync.
+          metrics:
+            image:
+              repository: ghcr.io/onedr0p/exportarr
+              # v2.3.0 is the newest tagged release (Aug 2025). main has since
+              # been renamed and is mid-rewrite for a v3 that has not shipped,
+              # so do NOT chase `latest` here - the two are far apart and the
+              # metric names below are the v2 ones.
+              tag: v2.3.0
+            # The app to poll is a subcommand, not a flag. One exporter process
+            # serves exactly one *arr.
+            args: ["prowlarr"]
+            env:
+              # 9707 is also the image's built-in default; set explicitly so the
+              # Service port and ServiceMonitor below have something to anchor to.
+              PORT: &metricsPort 9707
+              # Loopback, so this never leaves the pod. Port is *port (9696)
+              # above - YAML aliases cannot be interpolated into a string, so it
+              # is spelled out; keep the two in step.
+              URL: http://localhost:9696
+              # NOT the whole prowlarr-secret via envFrom: exportarr parses EVERY
+              # environment variable as config (koanf lowercases names and maps
+              # `__` to a path separator), so handing it unrelated keys is asking
+              # for a surprise. One key, mapped to the one name it wants.
+              API_KEY:
+                valueFrom:
+                  secretKeyRef:
+                    name: "{{ .Release.Name }}-secret"
+                    key: PROWLARR__AUTH__APIKEY
+              # Deliberately NOT setting PROWLARR__BACKFILL. The indexer stat
+              # counters are kept in the exporter's own memory and start at zero
+              # each time it restarts; backfill would instead pull Prowlarr's
+              # entire query history on first scrape, producing one enormous
+              # step that makes every rate() and delta() over that window lie.
+              # Counting from process start is the honest version - see the
+              # increase() comments in prometheusrule.yaml.
+              TZ: America/New_York
+            probes:
+              # /healthz answers 200 without touching Prowlarr, so it reports
+              # "exporter process alive", not "Prowlarr healthy" - which is what
+              # a probe should do. Whether Prowlarr is actually reachable shows
+              # up as prowlarr_system_status / a failed scrape instead.
+              liveness: &metricsProbes
+                enabled: true
+                custom: true
+                spec:
+                  httpGet:
+                    path: /healthz
+                    port: *metricsPort
+                  initialDelaySeconds: 10
+                  periodSeconds: 30
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+              readiness: *metricsProbes
+            securityContext:
+              allowPrivilegeEscalation: false
+              readOnlyRootFilesystem: true
+              capabilities: { drop: ["ALL"] }
+            resources:
+              requests:
+                cpu: 10m
+                memory: 32Mi
+              limits:
+                memory: 128Mi
     defaultPodOptions:
       securityContext:
         runAsNonRoot: true
@@ -71,27 +139,60 @@ spec:
         runAsGroup: 1000
         fsGroup: 1000
         fsGroupChangePolicy: OnRootMismatch
+    # advancedMounts rather than globalMounts throughout: globalMounts attaches a
+    # volume to EVERY container in the controller, and the exportarr sidecar has
+    # no business holding the config PVC open. It talks HTTP and nothing else.
+    # The `app` entries below are byte-for-byte what globalMounts produced.
     persistence:
       config:
         existingClaim: prowlarr
-        globalMounts:
-          - path: /config
+        advancedMounts:
+          prowlarr:
+            app:
+              - path: /config
       # readOnlyRootFilesystem is on, and *arr apps write logs and scratch
       # outside the config database. Both are regenerable, so tmpfs rather than
       # persisted volumes - this also keeps the backup free of log churn.
       logs:
         type: emptyDir
-        globalMounts:
-          - path: /config/logs
+        advancedMounts:
+          prowlarr:
+            app:
+              - path: /config/logs
       tmp:
         type: emptyDir
-        globalMounts:
-          - path: /tmp
+        advancedMounts:
+          prowlarr:
+            app:
+              - path: /tmp
     service:
       app:
         ports:
           http:
             port: *port
+          # Second port on the SAME Service rather than a service of its own -
+          # the HTTPRoute below pins its backendRef to *port, so nothing routes
+          # user traffic here. It exists for the ServiceMonitor to select.
+          metrics:
+            port: *metricsPort
+    serviceMonitor:
+      app:
+        # This chart auto-detects the Service only when exactly one exists,
+        # which is the case here - but say it explicitly anyway, because adding
+        # a second Service later would turn that into a hard template failure
+        # rather than a silent change. qBittorrent is already in that position
+        # thanks to its bittorrent LoadBalancer.
+        service:
+          identifier: app
+        endpoints:
+          - port: metrics
+            scheme: http
+            path: /metrics
+            # Prowlarr's collector also walks /indexerstats, which it asks for
+            # in windows since the last scrape - a longer interval would just
+            # make each window bigger, not the work smaller.
+            interval: 1m
+            scrapeTimeout: 30s
     route:
       app:
         hostnames: ["prowlarr.${SECRET_DOMAIN}"]

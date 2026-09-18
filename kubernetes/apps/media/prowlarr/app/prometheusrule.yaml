@@ -1,9 +1,15 @@
 ---
-# Prowlarr exposes no Prometheus endpoint of its own. The usual answer in this
-# ecosystem is exportarr, a sidecar that polls the *arr API and translates it to
-# metrics - worth adding once the whole stack is up and there is something
-# meaningful to chart across apps. Until then these alerts are built on
-# kube-state-metrics and VolSync, same approach as LLDAP and Jellyfin.
+# Two groups, because the alerts come from two very different places.
+#
+# prowlarr.rules is the original set: kube-state-metrics, kubelet volume stats
+# and VolSync. Those work whether or not Prowlarr itself is healthy, so they
+# stay the floor - if the exporter sidecar breaks, these still fire.
+#
+# prowlarr.exportarr.rules is everything the exportarr sidecar made possible
+# (see the `metrics` container in helmrelease.yaml). Prowlarr is the one place
+# in this stack where per-indexer numbers exist at all, so this is where
+# "searches are quietly failing" finally becomes visible instead of showing up
+# weeks later as "nothing new has downloaded".
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -48,5 +54,133 @@ spec:
             summary: >-
               Prowlarr config volume is over 85% full
               ({{ $value | printf "%.1f" }}%)
+          labels:
+            severity: warning
+
+    - name: prowlarr.exportarr.rules
+      rules:
+        # Selecting on service+endpoint rather than job: those two labels are
+        # attached by the Prometheus Operator from the ServiceMonitor itself,
+        # whereas `job` comes from whatever jobLabel resolves to and would go
+        # stale if that ever changed.
+        #
+        # exportarr answers /metrics with a 500 as soon as ANY of its collectors
+        # errors, so this single alert covers a wrong API key, a Prowlarr API
+        # that has stopped answering, and a crashed sidecar. The second clause
+        # keeps it quiet when the whole pod is simply gone - ProwlarrDown
+        # already says that.
+        - alert: ProwlarrMetricsScrapeFailing
+          expr: |-
+            up{namespace="media", service="prowlarr", endpoint="metrics"} == 0
+              and on()
+            kube_deployment_status_replicas_available{namespace="media", deployment="prowlarr"} > 0
+          for: 20m
+          annotations:
+            summary: >-
+              Prowlarr is running but its exportarr sidecar has failed every
+              scrape for 20m - check the API key in the prowlarr-secret
+              ExternalSecret and the sidecar logs
+          labels:
+            severity: warning
+
+        # exportarr derives this one by parsing Prowlarr's IndexerStatusCheck /
+        # IndexerLongTermStatusCheck health messages, which is the only place
+        # the disabled indexer's NAME appears - hence a dedicated alert rather
+        # than folding it into ProwlarrHealthError below. Prowlarr backs an
+        # indexer off after repeated failures and Sonarr/Radarr then silently
+        # search a smaller set of trackers.
+        - alert: ProwlarrIndexerUnavailable
+          expr: |-
+            prowlarr_indexer_unavailable == 1
+          for: 1h
+          annotations:
+            summary: >-
+              Prowlarr has marked indexer {{ $labels.indexer }} unavailable
+              after repeated errors - searches are running against a reduced
+              set of trackers
+          labels:
+            severity: warning
+
+        # Failure ratio per indexer. increase() rather than delta() on purpose:
+        # these counters live in the exporter's memory and reset to zero when
+        # the sidecar restarts, which is exactly the counter-reset shape
+        # increase() is built to handle.
+        #
+        # The second clause is the guard that makes this usable. A freshly
+        # restarted exporter has near-zero queries, where one failure is 100%;
+        # requiring 20 queries in the window means a quiet indexer cannot page.
+        - alert: ProwlarrIndexerFailureRateHigh
+          expr: |-
+            (
+              increase(prowlarr_indexer_failed_queries_total[6h])
+                /
+              increase(prowlarr_indexer_queries_total[6h])
+            ) > 0.5
+              and
+            increase(prowlarr_indexer_queries_total[6h]) > 20
+          for: 1h
+          annotations:
+            summary: >-
+              Over half of Prowlarr's queries to {{ $labels.indexer }} have
+              failed in the last 6h ({{ $value | humanizePercentage }}) -
+              likely expired credentials or a tracker blocking us
+          labels:
+            severity: warning
+
+        # Grabs are the end of the pipeline: a failing grab means Sonarr/Radarr
+        # found the release and then could not fetch the .torrent/.nzb. That
+        # usually means a ratio/VIP problem at the tracker rather than a
+        # transient error, so it is worth its own alert.
+        - alert: ProwlarrIndexerGrabsFailing
+          expr: |-
+            increase(prowlarr_indexer_failed_grabs_total[6h]) > 5
+          for: 30m
+          annotations:
+            summary: >-
+              {{ $value | printf "%.0f" }} grabs from {{ $labels.indexer }} have
+              failed in the last 6h - check the tracker account for ratio or
+              download limits
+          labels:
+            severity: warning
+
+        # The quietest possible failure in this stack: indexers still exist, so
+        # nothing looks broken, but every one of them is switched off and every
+        # search returns zero results forever.
+        - alert: ProwlarrNoEnabledIndexers
+          expr: |-
+            prowlarr_indexer_enabled_total == 0
+          for: 30m
+          annotations:
+            summary: >-
+              Prowlarr has no enabled indexers - every Sonarr and Radarr search
+              will return nothing
+          labels:
+            severity: warning
+
+        # Private trackers sold by subscription expose a VIP expiry date, and
+        # letting it lapse silently downgrades the account. Two weeks is enough
+        # notice to renew without nagging for months.
+        - alert: ProwlarrIndexerVipExpiringSoon
+          expr: |-
+            prowlarr_indexer_vip_expires_in_seconds < (14 * 24 * 60 * 60)
+          for: 6h
+          annotations:
+            summary: >-
+              VIP access to {{ $labels.indexer }} expires in
+              {{ $value | humanizeDuration }}
+          labels:
+            severity: warning
+
+        # Everything else Prowlarr reports as broken. The indexer status checks
+        # are excluded because ProwlarrIndexerUnavailable above already covers
+        # them with the indexer name attached.
+        - alert: ProwlarrHealthError
+          expr: |-
+            prowlarr_system_health_issues{type="error", source!~"Indexer.*StatusCheck"} == 1
+          for: 15m
+          annotations:
+            summary: >-
+              Prowlarr health check {{ $labels.source }} is in error:
+              {{ $labels.message }}
           labels:
             severity: warning

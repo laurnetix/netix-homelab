@@ -1,7 +1,19 @@
 ---
-# qBittorrent exposes no Prometheus endpoint; exportarr is the ecosystem answer and
-# is worth adding once the whole stack is up. Until then these are built on
-# kube-state-metrics and VolSync.
+# Two groups, because the alerts come from two very different places.
+#
+# qbittorrent.rules is the original set: kube-state-metrics, kubelet volume
+# stats and VolSync. Those work whether or not qBittorrent itself is healthy, so
+# they stay the floor - if the exporter sidecar breaks, these still fire.
+#
+# qbittorrent.exporter.rules is everything the metrics sidecar made possible
+# (see the `metrics` container in helmrelease.yaml). Note this is NOT exportarr,
+# which has no qBittorrent support - it is martabal/qbittorrent-exporter, and
+# the metric names below are its, not exportarr's.
+#
+# Deliberately NOT adding a free-space alert from
+# qbittorrent_global_free_space_on_disk_bytes: that reports the save path, which
+# is the NAS, and media-nfs's PrometheusRule already watches it through kubelet
+# volume stats - which keeps working even when qBittorrent does not.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -41,5 +53,105 @@ spec:
             summary: >-
               qBittorrent config volume is over 85% full
               ({{ $value | printf "%.1f" }}%)
+          labels:
+            severity: warning
+
+    - name: qbittorrent.exporter.rules
+      rules:
+        # service="qbittorrent-app", not "qbittorrent": this app has two
+        # Services (the ClusterIP and the bittorrent LoadBalancer), and the
+        # chart suffixes every Service with its identifier as soon as there is
+        # more than one. Selecting on service+endpoint rather than job because
+        # those two labels come from the ServiceMonitor itself, whereas `job`
+        # comes from whatever jobLabel resolves to.
+        #
+        # The exporter answers /metrics with a 503 whenever it cannot log in or
+        # the WebUI call fails, so this is also the alert that fires while the
+        # 1Password prerequisite in externalsecret.yaml is outstanding. The
+        # second clause keeps it quiet when the pod is simply gone -
+        # qBittorrentDown already says that.
+        - alert: qBittorrentMetricsScrapeFailing
+          expr: |-
+            up{namespace="media", service="qbittorrent-app", endpoint="metrics"} == 0
+              and on()
+            kube_deployment_status_replicas_available{namespace="media", deployment="qbittorrent"} > 0
+          for: 20m
+          annotations:
+            summary: >-
+              qBittorrent is running but its metrics sidecar has failed every
+              scrape for 20m - most likely the WebUI login: check that the
+              1Password item `qbittorrent` exists with QBITTORRENT_USERNAME and
+              QBITTORRENT_PASSWORD and that qbittorrent-secret has synced
+          labels:
+            severity: warning
+
+        # "Connected" here means connected to the BitTorrent network, not to the
+        # WebUI - qBittorrent can be perfectly healthy as a process while
+        # reaching no peers at all. The exporter emits exactly one series at a
+        # time, whose connection_status label carries the current value, so the
+        # three states get matched by label rather than by value - "firewalled"
+        # is split into its own alert below because the remedy is different.
+        - alert: qBittorrentDisconnected
+          expr: |-
+            qbittorrent_transfer_connection_status{connection_status="disconnected"} == 1
+          for: 30m
+          annotations:
+            summary: >-
+              qBittorrent has been disconnected from the BitTorrent network for
+              30m - nothing is downloading or seeding
+          labels:
+            severity: warning
+
+        # This is the alert the bittorrent LoadBalancer exists to make possible.
+        # Firewalled means peers cannot open connections INBOUND: qBittorrent
+        # still works, but only with peers that dial out to it, which measurably
+        # hurts seeding and therefore ratio on private trackers. In practice it
+        # means the router's TCP+UDP 50413 forward to 192.168.0.252 has stopped
+        # working - which is exactly the kind of thing a router firmware update
+        # or an ISP router swap silently undoes. Long fuse: a brief firewalled
+        # state right after a pod reschedule is normal.
+        - alert: qBittorrentFirewalled
+          expr: |-
+            qbittorrent_transfer_connection_status{connection_status="firewalled"} == 1
+          for: 2h
+          annotations:
+            summary: >-
+              qBittorrent has been firewalled for 2h - inbound peer connections
+              are not arriving; check the router port-forward of TCP+UDP 50413
+              to 192.168.0.252
+          labels:
+            severity: warning
+
+        # errored and missingFiles are the two states that never recover on
+        # their own. missingFiles in particular is the signature of the media
+        # NFS share having been unmounted or re-pathed underneath a running
+        # qBittorrent - the torrents stay listed, and every one of them stops
+        # seeding. The exporter pre-seeds a zero for every known state, so
+        # these series exist even when nothing is broken.
+        - alert: qBittorrentTorrentsErrored
+          expr: |-
+            qbittorrent_torrent_states{name=~"error|missingFiles"} > 0
+          for: 30m
+          annotations:
+            summary: >-
+              qBittorrent has {{ $value | printf "%.0f" }} torrents in state
+              {{ $labels.name }} - for missingFiles check that /data is still
+              mounted and the save paths still resolve
+          labels:
+            severity: warning
+
+        # A stalled download is one with no seeds. A few of those is ordinary
+        # life on a public tracker and absolutely not worth waking up for -
+        # this is only interesting when a pile of them sits there for half a
+        # day, which usually means every grab is landing on dead releases.
+        - alert: qBittorrentDownloadsStalled
+          expr: |-
+            qbittorrent_torrent_states{name="stalledDL"} > 3
+          for: 12h
+          annotations:
+            summary: >-
+              {{ $value | printf "%.0f" }} qBittorrent downloads have been
+              stalled with no seeds for 12h - Sonarr/Radarr are grabbing dead
+              releases
           labels:
             severity: warning
