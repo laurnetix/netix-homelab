@@ -1,0 +1,52 @@
+---
+# SABnzbd exposes no Prometheus endpoint; exportarr is the ecosystem answer and
+# is worth adding alongside the *arr exporters. Until then these are built on
+# kube-state-metrics and VolSync, matching qbittorrent.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: sabnzbd
+spec:
+  groups:
+    - name: sabnzbd.rules
+      rules:
+        - alert: SabnzbdDown
+          expr: |-
+            kube_deployment_status_replicas_available{namespace="media", deployment="sabnzbd"} == 0
+          for: 15m
+          annotations:
+            summary: >-
+              SABnzbd has had no available replica for 15m - Usenet downloads
+              have stopped and Sonarr/Radarr grabs will fail
+          labels:
+            severity: warning
+
+        - alert: SabnzbdBackupNotRunning
+          expr: |-
+            increase(volsync_sync_duration_seconds_count{obj_namespace="media", obj_name="sabnzbd", role="source"}[6h]) == 0
+          for: 1h
+          annotations:
+            summary: >-
+              SABnzbd has completed no VolSync backup in 6h - the news server
+              credentials and category config are unprotected
+          labels:
+            severity: warning
+
+        # Tighter than the other media config alerts on purpose. SABnzbd's
+        # default download_dir/complete_dir sit under /config, so a path left at
+        # its default sends the entire download queue into this 5Gi Longhorn
+        # volume instead of onto the NAS. Catching that at 75% gives a chance to
+        # fix it before the volume is full and the queue wedges mid-download.
+        - alert: SabnzbdConfigVolumeFillingUp
+          expr: |-
+            (kubelet_volume_stats_used_bytes{namespace="media", persistentvolumeclaim="sabnzbd"}
+              / kubelet_volume_stats_capacity_bytes{namespace="media", persistentvolumeclaim="sabnzbd"}) * 100 > 75
+          for: 15m
+          annotations:
+            summary: >-
+              SABnzbd config volume is over 75% full
+              ({{ $value | printf "%.1f" }}%) - check that Folders >
+              Temporary/Completed Download Folder point at /data/usenet/*, not
+              the /config default
+          labels:
+            severity: warning

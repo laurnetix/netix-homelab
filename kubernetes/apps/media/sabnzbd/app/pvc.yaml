@@ -1,0 +1,23 @@
+---
+# SABnzbd's config: the news server credentials (Frugal Usenet block account),
+# API key, categories, RSS feeds, and download history. None of it is
+# reproducible from the NAS, and the server password in particular exists
+# nowhere else in the cluster - so unlike the media itself, this is backed up
+# (ADR-0002).
+#
+# Deliberately small. SABnzbd's out-of-the-box download_dir/complete_dir point
+# at /config/Downloads/*, so if the paths are ever left at their defaults this
+# volume fills within one download and the app wedges - loudly, and before
+# anything has scribbled tens of GiB into a Longhorn replica set. A 5Gi ceiling
+# turns that misconfiguration into a fast, obvious failure instead of a slow
+# one. See the SabnzbdConfigVolumeFillingUp alert.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sabnzbd
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: longhorn

@@ -1,0 +1,24 @@
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: sabnzbd
+spec:
+  interval: 1h
+  path: ./kubernetes/apps/media/sabnzbd/app
+  postBuild:
+    substituteFrom:
+      - name: cluster-secrets
+        kind: Secret
+  prune: true
+  dependsOn:
+    # Downloads, unpack scratch and the finished files all live on the NFS
+    # share; the claim must be Bound first.
+    - name: media-nfs
+      namespace: media
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+    namespace: flux-system
+  targetNamespace: media
+  wait: true
