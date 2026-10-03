@@ -23,7 +23,7 @@ spec:
               # (qbittorrent-brr); the standard home-operations build is the
               # better default here.
               repository: ghcr.io/home-operations/qbittorrent
-              tag: 5.2.3
+              tag: 5.2.4
             env:
               QBT_WEBUI_PORT: &port 8080
               # Fixed torrent listening port. Must match any router port-forward
