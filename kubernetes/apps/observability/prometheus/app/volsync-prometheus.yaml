@@ -30,7 +30,11 @@ spec:
   # StatefulSet volumeClaimTemplate-generated name, not "prometheus".
   sourcePVC: prometheus-prometheus-kube-prometheus-prometheus-db-prometheus-prometheus-kube-prometheus-prometheus-0
   trigger:
-    schedule: 0 * * * *
+    # Every 6h, not hourly: copyMethod Snapshot means a full Longhorn clone of
+    # this volume per run (~15-25 min, 3x-replicated writes), which pushed iowait
+    # to ~50% on all nodes. :15 keeps it clear of the :00 hourly app backups and
+    # 30 min apart from victoria-logs (:45) so the two large clones never overlap.
+    schedule: 15 */6 * * *
   kopia:
     accessModes: [ReadWriteOnce]
     cacheAccessModes: [ReadWriteOnce]

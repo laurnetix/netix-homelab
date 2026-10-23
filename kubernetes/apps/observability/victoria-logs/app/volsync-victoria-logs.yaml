@@ -30,7 +30,10 @@ spec:
   # StatefulSet volumeClaimTemplate-generated name, not "victoria-logs".
   sourcePVC: server-volume-victoria-logs-0
   trigger:
-    schedule: 0 * * * *
+    # Every 6h, not hourly: copyMethod Snapshot means a full Longhorn clone of
+    # this volume per run, a heavy I/O load on every node. :45 keeps it clear of
+    # the :00 hourly app backups and of the Prometheus clone (:15).
+    schedule: 45 */6 * * *
   kopia:
     accessModes: [ReadWriteOnce]
     cacheAccessModes: [ReadWriteOnce]
