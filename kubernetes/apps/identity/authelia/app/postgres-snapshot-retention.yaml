@@ -1,0 +1,165 @@
+---
+# Retention for the daily CNPG volume snapshots of Authelia's PostgreSQL.
+#
+# CNPG has no retention policy for volume-snapshot backups (only object-store
+# backups support one), so every daily ScheduledBackup leaves a Backup object
+# and a VolumeSnapshot - and therefore a Longhorn snapshot on the instance
+# volume - forever. 73 had piled up by 2026-10-22, against Longhorn's
+# per-volume cap of 250 snapshots.
+#
+# This keeps the newest KEEP completed backups and deletes everything older:
+# first the Backup objects, then any CNPG snapshot of this cluster older than
+# the oldest kept backup (which also sweeps up snapshots orphaned from their
+# Backup). The longhorn VolumeSnapshotClass has deletionPolicy: Delete, so
+# deleting a VolumeSnapshot frees the Longhorn snapshot behind it.
+#
+# Snapshots are deleted explicitly rather than by setting
+# backup.volumeSnapshot.snapshotOwnerReference: backup on the Cluster. Because
+# backupOwnerReference: self already makes the ScheduledBackup own every
+# Backup, that would chain every local snapshot to the ScheduledBackup, and
+# recreating it would wipe all of them at once.
+#
+# Offsite protection is unaffected: that is the daily pg_dump in
+# postgres-dump.yaml, which rides Kopia with its own, longer retention.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: authelia-postgres-snapshot-retention
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: authelia-postgres-snapshot-retention
+rules:
+  # Least privilege: enumerate and delete, nothing else.
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["backups"]
+    verbs: ["list", "delete"]
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshots"]
+    verbs: ["list", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: authelia-postgres-snapshot-retention
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: authelia-postgres-snapshot-retention
+subjects:
+  - kind: ServiceAccount
+    name: authelia-postgres-snapshot-retention
+    namespace: identity
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: authelia-postgres-snapshot-retention
+spec:
+  # 04:45 daily (UTC, like the other CronJobs here) - after CNPG's 03:30
+  # snapshot has completed, so the day's new backup counts toward KEEP.
+  schedule: "45 4 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # Surface a persistent failure (KubeJobFailed) rather than retrying
+      # silently forever. Every step is idempotent, so a retry is safe.
+      backoffLimit: 2
+      template:
+        spec:
+          serviceAccountName: authelia-postgres-snapshot-retention
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: prune
+              # Used only for its bundled kubectl. The official
+              # registry.k8s.io/kubectl image is distroless (no shell); this one
+              # is Alpine-based with sh/awk/sort, from a project the cluster
+              # already depends on.
+              image: ghcr.io/fluxcd/flux-cli:v2.9.6
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: ["ALL"] }
+              env:
+                - name: CLUSTER
+                  value: authelia-postgres
+                # Two weeks of fast in-cluster restore points. Anything older
+                # is covered by the offsite pg_dump.
+                - name: KEEP
+                  value: "14"
+                # "true" logs what would be deleted without deleting anything.
+                - name: DRY_RUN
+                  value: "false"
+                - name: NAMESPACE
+                  valueFrom:
+                    fieldRef: { fieldPath: metadata.namespace }
+                # kubectl writes its discovery cache under $HOME.
+                - name: HOME
+                  value: /tmp
+              command:
+                - sh
+                - -c
+                - |
+                  set -euo pipefail
+                  run() { if [ "$DRY_RUN" = true ]; then echo "[dry-run] $*"; else "$@"; fi; }
+
+                  # "<creationTimestamp> <name> <phase> <method>", oldest first.
+                  # RFC3339 UTC timestamps order correctly as plain strings.
+                  backups=$(kubectl -n "$NAMESPACE" get backups.postgresql.cnpg.io \
+                    -l "cnpg.io/cluster=$CLUSTER" \
+                    -o jsonpath='{range .items[*]}{.metadata.creationTimestamp} {.metadata.name} {.status.phase} {.spec.method}{"\n"}{end}' \
+                    | sort)
+                  completed=$(printf '%s\n' "$backups" | awk '$3 == "completed" && $4 == "volumeSnapshot"')
+                  count=$(printf '%s\n' "$completed" | grep -c . || true)
+                  if [ "$count" -le "$KEEP" ]; then
+                    echo "$count completed backups, KEEP=$KEEP - nothing to prune"
+                    exit 0
+                  fi
+
+                  # Creation time of the oldest backup being kept; older goes.
+                  cutoff=$(printf '%s\n' "$completed" | tail -n "$KEEP" | head -n 1 | cut -d' ' -f1)
+                  case "$cutoff" in
+                    20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*Z) ;;
+                    *) echo "refusing to prune: unexpected cutoff '$cutoff'"; exit 1 ;;
+                  esac
+                  echo "keeping the newest $KEEP of $count completed backups; pruning anything created before $cutoff"
+
+                  # Failed backups older than the cutoff go too, so they cannot
+                  # accumulate. Running or pending ones are never touched.
+                  printf '%s\n' "$backups" \
+                    | awk -v c="$cutoff" '$1 < c && $4 == "volumeSnapshot" && ($3 == "completed" || $3 == "failed") { print $2 }' \
+                    | while read -r b; do
+                        run kubectl -n "$NAMESPACE" delete backups.postgresql.cnpg.io "$b" --wait=false
+                      done
+
+                  # Snapshots are not owned by their Backup, so delete them
+                  # explicitly. Matching by age rather than by the Backup names
+                  # above also catches snapshots already orphaned from a Backup.
+                  kubectl -n "$NAMESPACE" get volumesnapshots.snapshot.storage.k8s.io \
+                    -l "cnpg.io/cluster=$CLUSTER,cnpg.io/backupName" \
+                    -o jsonpath='{range .items[*]}{.metadata.creationTimestamp} {.metadata.name}{"\n"}{end}' \
+                    | awk -v c="$cutoff" '$1 < c { print $2 }' \
+                    | while read -r s; do
+                        run kubectl -n "$NAMESPACE" delete volumesnapshots.snapshot.storage.k8s.io "$s" --wait=false
+                      done
+                  echo "done"
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  memory: 128Mi
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir: {}

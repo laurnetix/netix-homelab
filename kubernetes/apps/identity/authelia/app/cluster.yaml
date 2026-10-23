@@ -54,6 +54,8 @@ kind: ScheduledBackup
 metadata:
   name: authelia-postgres
 spec:
+  # CNPG has no retention policy for volume-snapshot backups, so the old ones
+  # are pruned by postgres-snapshot-retention.yaml.
   # CNPG uses six-field cron (leading seconds field): 03:30 daily.
   schedule: "0 30 3 * * *"
   cluster:

@@ -7,6 +7,7 @@ resources:
   - ./helmrelease.yaml
   - ./ocirepository.yaml
   - ./postgres-dump.yaml
+  - ./postgres-snapshot-retention.yaml
   - ./prometheusrule.yaml
   - ./volsync-postgres-dump.yaml
 configMapGenerator:

@@ -22,9 +22,17 @@ spec:
 
         # Authelia holds no accounts itself, but losing Postgres loses every
         # 2FA enrolment and forces the whole family to re-enrol.
+        #
+        # Built on CNPG's own exporter, not kube-state-metrics: CNPG manages
+        # instance pods directly, with no StatefulSet, so the previous
+        # kube_statefulset_status_replicas_ready query matched nothing and this
+        # alert could never fire. cnpg_collector_up is 1 per instance whose
+        # PostgreSQL is up. max by (pod) collapses the stale series a
+        # recreated pod leaves behind under its old IP, and `or on() vector(0)`
+        # treats every instance vanishing at once as down rather than silence.
         - alert: AutheliaPostgresDown
           expr: |-
-            kube_statefulset_status_replicas_ready{namespace="identity", statefulset=~"authelia-postgres.*"} == 0
+            (sum(max by (pod) (cnpg_collector_up{namespace="identity", cluster="authelia-postgres"})) or on() vector(0)) == 0
           for: 10m
           annotations:
             summary: >-
@@ -32,6 +40,24 @@ spec:
               logins and 2FA verification will fail
           labels:
             severity: critical
+
+        # The daily CNPG snapshots are pruned only by the
+        # authelia-postgres-snapshot-retention CronJob; CNPG has no retention for
+        # volume snapshots. A failed run already raises KubeJobFailed, but a job
+        # that silently stops running would raise nothing while snapshots pile
+        # up again toward Longhorn's 250-per-volume cap. The `> 0` guard skips
+        # the series before the job has ever succeeded.
+        - alert: AutheliaPostgresSnapshotPruningStale
+          expr: |-
+            time() - (kube_cronjob_status_last_successful_time{namespace="identity", cronjob="authelia-postgres-snapshot-retention"} > 0) > 3 * 86400
+          for: 1h
+          annotations:
+            summary: >-
+              Authelia's Postgres snapshot pruning has not succeeded in
+              {{ $value | humanizeDuration }} - CNPG volume snapshots are
+              accumulating again
+          labels:
+            severity: warning
 
         # Sustained failed logins on an internet-facing portal. Authelia's own
         # regulation bans the source after 3 tries; this surfaces a broad or
