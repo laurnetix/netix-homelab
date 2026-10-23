@@ -3,6 +3,6 @@
 # Image Factory, so the old datasource silently pinned Talos while kubelet kept
 # advancing. See kubernetes/apps/system-upgrade/tuppr/upgrades/talos.yaml.
 # renovate: datasource=github-releases depName=siderolabs/talos
-talosVersion: v1.14.1
+talosVersion: v1.14.4
 # renovate: datasource=docker depName=ghcr.io/siderolabs/kubelet
 kubernetesVersion: v1.37.0
