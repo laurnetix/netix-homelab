@@ -90,6 +90,28 @@
       dependencyDashboardApproval: true,
     },
     {
+      // The home-operations *arr images track each app's develop (beta) branch,
+      // and the four-part tags carry no -beta marker, so Renovate cannot tell a
+      // beta from a stable build - all three have run prerelease builds most of
+      // the time. Majors are where that bites: they spend weeks as upstream
+      // PRERELEASES (every Sonarr v5.0.0.x build was prerelease=true; v5 landed
+      // this way, unnoticed, in PR #153), and a major migrates the database on
+      // first boot so the previous major cannot run against it. Reverting the
+      // image is not a rollback; only restoring the VolSync/Kopia snapshot is.
+      // Pre-flight before approving: check `prerelease` on the release at
+      // github.com/{Sonarr/Sonarr,Radarr/Radarr,Prowlarr/Prowlarr}/releases,
+      // and confirm a recent Kopia snapshot of <app>@media:/data exists (they
+      // back up hourly).
+      description: "Require manual approval for Sonarr/Radarr/Prowlarr major bumps (prerelease betas, irreversible DB migration)",
+      matchPackageNames: [
+        "ghcr.io/home-operations/sonarr",
+        "ghcr.io/home-operations/radarr",
+        "ghcr.io/home-operations/prowlarr",
+      ],
+      matchUpdateTypes: ["major"],
+      dependencyDashboardApproval: true,
+    },
+    {
       description: "Override Helmfile Dependency Name",
       matchDatasources: ["docker"],
       matchManagers: ["helmfile"],
