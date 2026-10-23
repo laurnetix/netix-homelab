@@ -25,7 +25,7 @@ metadata:
 spec:
   talos:
     # renovate: datasource=github-releases depName=siderolabs/talos
-    version: v1.14.1
+    version: v1.14.4
   # All 3 nodes are control-plane (no dedicated workers), so no nodeSelector -
   # every node is in scope. Talos itself additionally enforces one-CP-node-at-
   # a-time via etcd quorum checks, independent of tuppr.
