@@ -14,5 +14,5 @@ spec:
     # once it exists - hold that until the Kubernetes upgrade to 1.37 lands
     # first, otherwise the eviction logic runs against an API it wasn't
     # validated on.
-    tag: 0.36.0
+    tag: 0.37.0
   url: oci://ghcr.io/home-operations/charts-mirror/descheduler
