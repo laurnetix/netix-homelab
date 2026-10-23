@@ -1,0 +1,40 @@
+---
+# Single-replica Longhorn class for VolSync's throwaway backup clones ONLY.
+#
+# With copyMethod: Snapshot, every VolSync run restores the source snapshot
+# into a temporary PVC of the ReplicationSource's storageClassName, lets the
+# Kopia mover read it, then deletes it. On the default `longhorn` class that
+# temporary clone is written to all 3 replicas - one per node - and each node
+# has a single NVMe that etcd also lives on. Measured 2026-10-23: a 14 GiB
+# Prometheus clone pushed iowait to ~50% on every node, stalled etcd fsyncs
+# for ~15 min, and forced leader elections and control-plane restarts.
+#
+# One replica writes the clone to one node's disk only, so two of the three
+# etcd members - a quorum - stay unaffected. The reduced redundancy costs
+# nothing: the clone lives only for the length of one backup run, and if its
+# node fails mid-run that run fails and the next scheduled one retries.
+#
+# Never use this class for real data. Parameters otherwise mirror the
+# chart-managed `longhorn` class.
+#
+# Caveat: under node-drain-policy block-if-contains-last-replica, a clone that
+# is mid-run (or wedged on a failed Longhorn clone) is a "last replica" and
+# blocks a drain of its node until it is gone.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: longhorn-clone
+provisioner: driver.longhorn.io
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+parameters:
+  numberOfReplicas: "1"
+  staleReplicaTimeout: "30"
+  fromBackup: ""
+  fsType: ext4
+  dataLocality: disabled
+  dataEngine: v1
+  disableRevisionCounter: "true"
+  unmapMarkSnapChainRemoved: ignored
+  backupTargetName: default

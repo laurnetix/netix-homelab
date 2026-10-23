@@ -20,9 +20,10 @@ spec:
         # ~200GB free per node as of 2026-07; 30Gi x 3 Longhorn replicas = 90GB
         # actual disk usage cluster-wide, comfortable headroom either way.
         size: 30Gi
-      # 60d is a middle ground between troubleshooting depth and disk usage -
-      # tune down if this fills faster than expected once real traffic lands.
-      retentionPeriod: 60d
+      # 5d, down from 60d (2026-10-23), matching Prometheus. This volume is
+      # full-cloned by VolSync on the NVMe that etcd shares, so a smaller store
+      # means a smaller, shorter I/O burst per backup run.
+      retentionPeriod: 5d
       route:
         enabled: true
         hostnames:

@@ -62,5 +62,8 @@ spec:
       hourly: 24
       daily: 7
       weekly: 4
-    storageClassName: longhorn
+    # Class of the temporary clone the mover reads from - single replica, so
+    # the clone is written to one node's disk instead of all three (see
+    # storage/longhorn/app/storageclass-clone.yaml for why that spares etcd).
+    storageClassName: longhorn-clone
     volumeSnapshotClassName: longhorn

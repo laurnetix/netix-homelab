@@ -6,4 +6,5 @@ resources:
   - ./helmrelease.yaml
   - ./prometheusrule.yaml
   - ./recurringjob.yaml
+  - ./storageclass-clone.yaml
   - ./volumesnapshotclass.yaml

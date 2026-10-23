@@ -23,6 +23,24 @@ spec:
     # — fire permanently at severity=critical, which can never clear.
     kubeProxy:
       enabled: false
+    # The apiserver is the largest series source (~68k of ~344k head series on
+    # 2026-10-23), mostly debug-grade histogram buckets that no rule, alert or
+    # dashboard here reads (checked against loaded rules, the repo, and every
+    # gnetId dashboard). Dropping them shrinks the TSDB - and so the VolSync
+    # clone that stalls etcd - by ~20%. Only the _bucket series go; _sum and
+    # _count stay for rates and averages.
+    kubeApiServer:
+      serviceMonitor:
+        metricRelabelings:
+          # Chart default, restated because setting this list replaces it:
+          # thins the le buckets of the request/etcd duration histograms that
+          # the SLO burn-rate rules DO use.
+          - action: drop
+            sourceLabels: [__name__, le]
+            regex: '(etcd_request|apiserver_request_slo|apiserver_request_sli|apiserver_request)_duration_seconds_bucket;(0\.15|0\.2|0\.3|0\.35|0\.4|0\.45|0\.6|0\.7|0\.8|0\.9|1\.25|1\.5|1\.75|2|3|3\.5|4|4\.5|6|7|8|9|15|20|40|45|50)(\.0)?'
+          - action: drop
+            sourceLabels: [__name__]
+            regex: 'apiserver_(watch_events_dispatch_duration_seconds|watch_list_duration_seconds|storage_list_duration_seconds|request_body_size_bytes|watch_cache_read_wait_seconds|watch_cache_initialization_duration_seconds|watch_events_sizes|response_sizes)_bucket'
     # etcd was completely unmonitored until 2026-09-17, which left the most
     # likely cause of apiserver `leases` 500/504s invisible: etcd logs showed
     # "apply request took too long" (423ms vs a 100ms expectation) on
@@ -61,13 +79,19 @@ spec:
         ruleSelectorNilUsesHelmValues: false
         probeSelectorNilUsesHelmValues: false
         scrapeConfigSelectorNilUsesHelmValues: false
-        retention: 10d
+        # 5d, down from 10d (2026-10-23). The TSDB sits at its retention steady
+        # state (~11 GiB at 10d, ~1.1 GiB/day of ingest), and every VolSync run
+        # full-clones this volume on the single NVMe that etcd shares - a 14 GiB
+        # clone stalled etcd for ~15 min per run. Halving retention halves both.
+        retention: 5d
         # Hard ceiling on persisted blocks. Without this, retention is time-only:
         # 10d of ~400k active series overran the old 8Gi volume, WAL writes began
         # failing with ENOSPC, and ingestion stopped entirely (dashboards went N/A).
         # Keep this comfortably under the volume size — it does not bound the WAL,
-        # and compaction needs free space to write a new block.
-        retentionSize: 26GB
+        # and compaction needs free space to write a new block. 12GB is ~2x the
+        # expected 5d footprint: room for a cardinality spike, while still
+        # bounding how much a backup clone has to copy.
+        retentionSize: 12GB
         storageSpec:
           volumeClaimTemplate:
             spec:
