@@ -22,8 +22,18 @@ spec:
               # Upstream-stable 5.2.3. The reference repo uses a personal fork
               # (qbittorrent-brr); the standard home-operations build is the
               # better default here.
+              #
+              # PINNED for the private-tracker client whitelist: Anthelion only
+              # accepts specific qBittorrent versions. 5.3.0 (PR #137,
+              # 2026-10-23) got "Your client is not on the whitelist" on every
+              # announce, so seed time stopped counting, and was rolled back.
+              # Every bump is approval-gated in .renovaterc.json5 - check
+              # Anthelion's whitelist before approving one.
+              # Downgrading from 5.3.x is safe: its torrents.db schema v10 only
+              # adds a share_limits_mode column (with a default) that 5.2.3
+              # ignores.
               repository: ghcr.io/home-operations/qbittorrent
-              tag: 5.3.0
+              tag: 5.2.3
             env:
               QBT_WEBUI_PORT: &port 8080
               # Fixed torrent listening port. Must match any router port-forward

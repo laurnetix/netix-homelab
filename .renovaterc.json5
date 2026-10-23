@@ -112,6 +112,18 @@
       dependencyDashboardApproval: true,
     },
     {
+      // Private trackers only accept whitelisted client versions, so ANY
+      // qBittorrent bump - patch, minor or major - can silently stop seed
+      // credit. 5.2.3 -> 5.3.0 (PR #137) did exactly that: Anthelion answered
+      // every announce with "Your client is not on the whitelist" while the
+      // torrents kept seeding, so nothing looked broken locally.
+      // Pre-flight before approving: confirm the new version is on Anthelion's
+      // client whitelist.
+      description: "Require manual approval for every qBittorrent update (private-tracker client whitelist)",
+      matchPackageNames: ["ghcr.io/home-operations/qbittorrent"],
+      dependencyDashboardApproval: true,
+    },
+    {
       description: "Override Helmfile Dependency Name",
       matchDatasources: ["docker"],
       matchManagers: ["helmfile"],
