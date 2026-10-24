@@ -37,7 +37,7 @@ spec:
               # land silently on any pod restart - unacceptable for an app whose
               # upgrades rewrite the database irreversibly, and it would bypass
               # the Renovate approval gate in .renovaterc.json5.
-              tag: 12.2@sha256:c3efa69a22f2691fc88d6bb035e87a8560e395a6047f062fb381c61c3185e8f5
+              tag: 12.3@sha256:2038fe038ab3876a80f6e7b7e0aef6607b032c7dc0c9b3ad3296d0b2eba3bbb5
             command:
               - sh
               - -c
@@ -57,7 +57,7 @@ spec:
             image:
               repository: ghcr.io/jellyfin/jellyfin
               # Keep in lockstep with the enable-metrics init container above.
-              tag: 12.2@sha256:c3efa69a22f2691fc88d6bb035e87a8560e395a6047f062fb381c61c3185e8f5
+              tag: 12.3@sha256:2038fe038ab3876a80f6e7b7e0aef6607b032c7dc0c9b3ad3296d0b2eba3bbb5
             env:
               # Advertised to clients for direct connections; without it
               # Jellyfin guesses from the request and can hand out the
