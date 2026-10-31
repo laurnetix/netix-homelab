@@ -83,7 +83,7 @@ spec:
               # registry.k8s.io/kubectl image is distroless (no shell); this one
               # is Alpine-based with sh/awk/sort, from a project the cluster
               # already depends on.
-              image: ghcr.io/fluxcd/flux-cli:v2.9.6
+              image: ghcr.io/fluxcd/flux-cli:v2.10.0
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true
