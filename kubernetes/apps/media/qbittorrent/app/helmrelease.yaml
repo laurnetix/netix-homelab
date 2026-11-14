@@ -92,7 +92,7 @@ spec:
           metrics:
             image:
               repository: ghcr.io/martabal/qbittorrent-exporter
-              tag: v2.0.3
+              tag: v2.0.4
             env:
               # Its own default is 8090, which collides with nothing here but is
               # also the default for QBITTORRENT_BASE_URL - set both explicitly
